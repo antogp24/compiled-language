@@ -1,6 +1,7 @@
 #include "lexer.h"
 #include <fstream>
 #include <unordered_map>
+#include <charconv>
 
 std::string read_entire_file(std::string_view path)
 {
@@ -34,10 +35,9 @@ void pretty_print_line(std::string_view line, Location location)
 {
     size_t line_number_digit_count = get_digit_count(location.line);
     eprintln("{:>{}} | ", ' ', line_number_digit_count);
-    eprintln("{} | {}\n", location.line, line);
+    eprintln("{} | {}", location.line, line);
     eprintln("{:>{}} | {:>{}}", ' ', line_number_digit_count, '^', location.column + 1);
 };
-
 
 // I don't use isspace because it has undefined behaviour for certain inputs.
 bool is_whitespace(char c)
@@ -59,9 +59,55 @@ bool is_alphabetic(char c)
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
-bool is_numeric(char c)
+bool is_hexadecimal_letter(char c)
 {
-    return c >= '0' && c <= '9';
+    return (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+}
+
+bool is_decimal_digit(char c)
+{
+    return (c >= '0') && (c <= '9');
+}
+
+bool is_binary_digit(char c)
+{
+    return (c == '0') || (c == '1');
+}
+
+bool is_octal_digit(char c)
+{
+    return (c >= '0') && (c <= '7');
+}
+
+bool is_hexadecimal_digit(char c)
+{
+    return is_hexadecimal_letter(c) || is_decimal_digit(c);
+}
+
+bool is_base_compatible_with(Number_Base base, Number_Base other)
+{
+    return (int)base >= (int)other;
+}
+
+Number_Base get_digit_base(char c)
+{
+    using enum Number_Base;
+
+    if (is_binary_digit(c)) {
+        return Binary;
+    } else if (is_octal_digit(c)) {
+        return Octal;
+    } else if (is_decimal_digit(c)) {
+        return Decimal;
+    } else if (is_hexadecimal_digit(c)) {
+        return Hexadecimal;
+    }
+    return None;
+}
+
+bool is_alphanumeric(char c)
+{
+    return is_alphabetic(c) || is_decimal_digit(c);
 }
 
 Token_Kind get_keyword(std::string_view text)
@@ -167,11 +213,115 @@ Token_ID Lexer::push_token(Token_Kind kind, Location loc, Token_Data data)
     return id;
 }
 
+double Lexer::parse_f64(std::string_view number_text, Location loc)
+{
+    double value = 0.0;
+    std::from_chars_result result = std::from_chars(
+        number_text.data(),
+        number_text.data() + number_text.size(),
+        value);
+
+#pragma warning(push)
+#pragma warning(disable : 4063)
+    switch (result.ec) {
+    case std::errc():
+        // No error, the expected branch.
+        break;
+    case std::errc::invalid_argument:
+        error_at(*this, loc, "Failed to parse float, this is not a number: \"{}\"", number_text);
+        break;
+    case std::errc::result_out_of_range:
+        error_at(*this, loc, "Failed to parse float, it is larger than what a 64-bit float supports: {}", number_text);
+        break;
+    default:
+        error_at(*this, loc, "Failed to parse float: \"{}\"", number_text);
+        break;
+    }
+    return value;
+#pragma warning(pop)
+}
+
+uint64_t Lexer::parse_u64(std::string_view number_text, Location loc, int base)
+{
+    uint64_t value = 0;
+    std::from_chars_result result = std::from_chars(
+        number_text.data(),
+        number_text.data() + number_text.size(),
+        value,
+        base);
+
+#pragma warning(push)
+#pragma warning(disable : 4063)
+    switch (result.ec) {
+    case std::errc():
+        // No error, the expected branch.
+        break;
+    case std::errc::invalid_argument:
+        error_at(*this, loc, "Failed to parse int, this is not a number: \"{}\"", number_text);
+        break;
+    case std::errc::result_out_of_range:
+        error_at(*this, loc, "Failed to parse int, it is larger than what a 64-bit unsigned integer supports: {}", number_text);
+        break;
+    default:
+        error_at(*this, loc, "Failed to parse int: \"{}\"", number_text);
+        break;
+    }
+    return value;
+#pragma warning(pop)
+}
+
+std::string Lexer::unescape(std::string_view text, Location loc)
+{
+    // As a reference, take a look at this:
+    // https://gist.github.com/ConnerWill/d4b6c776b509add763e17f9f113fd25b
+
+    const size_t len = text.size();
+    std::string unescaped = {};
+
+    for (size_t i = 0; i < len;) {
+        if (text[i] == '\\') {
+            i++; // consume the '\\'
+            if (i >= len) {
+                error_at(*this, loc, "Unterminated escape sequence.");
+            }
+            switch (text[i]) {
+            case '\'': unescaped.push_back('\''); i++; break; // Single Quote
+            case '\"': unescaped.push_back('\"'); i++; break; // Double Quote
+            case 'a': unescaped.push_back('\a'); i++; break; // Terminal Bell
+            case 'b': unescaped.push_back('\b'); i++; break; // Backspace
+            case 't': unescaped.push_back('\t'); i++; break; // Horizontal TAB
+            case 'v': unescaped.push_back('\v'); i++; break; // Vertical TAB
+            case 'n': unescaped.push_back('\n'); i++; break; // Linefeed
+            case 'f': unescaped.push_back('\f'); i++; break; // Formfeed
+            case 'r': unescaped.push_back('\r'); i++; break; // Carriage return
+            case 'x': {
+                i++; // consume the 'x'
+                size_t start = i;
+                while (i < len && is_hexadecimal_digit(text[i])) {
+                    i++;
+                }
+                std::string_view hex_number_text = text.substr(start, i - start);
+                uint64_t hex = parse_u64(hex_number_text, loc, 16);
+                char least_significant_byte = (char)(hex & 0xff);
+                unescaped.push_back(least_significant_byte);
+            } break;
+
+            default:
+                error_at(*this, loc, "Unsupported/Undefined escape sequence.");
+            }
+        } else {
+            unescaped.push_back(text[i]);
+            i++;
+        }
+    }
+    return unescaped;
+}
+
 void Lexer::advance(size_t count)
 {
     for (size_t i = 0; !is_eof() && i < count; ++i) {
         if (source[cursor] == '\n') {
-            std::string_view this_line = source.substr(current_line_start, cursor - current_line_start);
+            std::string_view this_line = slice_source(current_line_start, cursor);
             line_map.insert({ location.line, this_line });
             location.line++;
             location.column = 0;
@@ -205,7 +355,7 @@ void Lexer::print_error_message_line(Location error_location)
         while (!is_eof() && source[cursor] != '\n') {
             advance(1);
         }
-        advance(1); // Consume the \n, this also updates the line map.
+        advance(1); // consume the \n, this also updates the line map.
 
         // Now it should contain the line.
         if (line_map.contains(error_location.line)) {
@@ -275,11 +425,9 @@ do{\
         char c = source[cursor];
         if (c == '_' || is_alphabetic(c)) {
             lex_identifier();
-        }
-        else if (is_numeric(c)) {
+        } else if (is_decimal_digit(c)) {
             lex_number_literal();
-        }
-        else {
+        } else {
             switch (c) {
             case '\'': lex_char_literal(); break;
             case '\"': lex_string_literal(); break;
@@ -322,17 +470,108 @@ do{\
 
 void Lexer::lex_identifier()
 {
-    feature_todo(*this, location, "Identifiers");
+    Location loc = location;
+    size_t start = cursor;
+
+    advance(1); // consume the first character of the identifier.
+    while (!is_eof()) {
+        char c = source[cursor];
+        if (c == '_' || is_alphanumeric(c)) {
+            advance(1);
+        } else {
+            break;
+        }
+    }
+    std::string_view identifier_name = slice_source(start, cursor);
+    Token_Kind kind = get_keyword(identifier_name);
+
+    if (kind == Token_Kind::None) {
+        push_token(Token_Kind::Identifier, loc, Token_Data{ .str = identifier_name });
+    } else {
+        push_token(kind, loc); // It's a keyword.
+    }
+}
+
+void Lexer::consume_digits(Number_Base base)
+{
+    // TODO: Support scientific exponentiation.
+    while (!is_eof() && is_alphanumeric(source[cursor])) {
+        char c = source[cursor];
+        Number_Base c_base = get_digit_base(c);
+        if (!is_base_compatible_with(base, c_base)) {
+            error_at(*this, location, "The character '{}' is not in {} base.", c, magic_enum::enum_name(base));
+        }
+        advance(1);
+    }
 }
 
 void Lexer::lex_number_literal()
 {
-    feature_todo(*this, location, "Number literal");
+    Location loc = location;
+    size_t start = cursor;
+
+    Number_Base base = Number_Base::Decimal; // The default is decimal.
+
+    // Handling support 0x, 0b and 0o prefixes for integers.
+    if (source[cursor] == '0') {
+        advance(1); // consume the leading 0.
+        char prefix = source[cursor];
+        switch (prefix) {
+        case 'b': base = Number_Base::Binary; break;
+        case 'o': base = Number_Base::Octal; break;
+        case 'x': base = Number_Base::Hexadecimal; break;
+        default:
+            error_at(*this, loc, "Unrecognized integer prefix \"0{}\"", prefix);
+        }
+        advance(1); // consume the base prefix.
+    }
+
+    consume_digits(base); // leading digits.
+
+    if (!is_eof() && source[cursor] == '.') {
+        advance(1); // consume the dot.
+        consume_digits(base); // trailing digits.
+
+        std::string_view float_number_text = slice_source(start, cursor);
+        double float_value = parse_f64(float_number_text, loc);
+        push_token(Token_Kind::Float_Literal, loc, Token_Data{ .float_literal = float_value });
+    } else {
+        std::string_view integer_number_text = slice_source(start, cursor);
+        uint64_t integer_value = parse_u64(integer_number_text, loc, (int)base);
+        push_token(Token_Kind::Int_Literal, loc, Token_Data{ .int_literal = integer_value });
+    }
 }
 
 void Lexer::lex_char_literal()
 {
-    feature_todo(*this, location, "Char literal");
+    Location loc = location;
+    Assert(source[cursor] == '\'');
+    advance(1); // consume the first '
+
+    size_t start = cursor;
+    while (!is_eof() && source[cursor] != '\'') {
+        if (source[cursor] == '\\') {
+            advance(1); // consume first character of escape sequence (could be the ')
+        }
+        advance(1);
+    }
+    if (is_eof()) {
+        error_at(*this, loc, "Unterminated Char literal.");
+    }
+
+    std::string_view escaped_char_text = slice_source(start, cursor);
+    std::string unescaped = unescape(escaped_char_text, loc);
+
+    if (unescaped.size() == 0) {
+        error_at(*this, loc, "Empty Char literal is invalid.");
+    } else if (unescaped.size() > 1) {
+        error_at(*this, loc, "More than one character in Char literal.");
+    }
+    char char_literal = unescaped[0];
+    push_token(Token_Kind::Char_Literal, loc, Token_Data{ .char_literal = char_literal });
+
+    Assert(source[cursor] == '\'');
+    advance(1); // consume the last '\''
 }
 
 void Lexer::lex_string_literal()

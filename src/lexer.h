@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 #include <magic_enum/magic_enum.hpp>
+#include <debug_break.h>
 #include "core/pool.h"
 #include "core/option.h"
 
@@ -113,12 +114,27 @@ enum class Token_Kind {
     Semicolon,       // ;
 };
 
+enum class Number_Base : int {
+    None = 0,
+    Binary = 2,
+    Octal = 8,
+    Decimal = 10,
+    Hexadecimal = 16,
+};
+
 std::string read_entire_file(std::string_view path);
 size_t get_digit_count(size_t x);
 void pretty_print_line(std::string_view line, Location location);
 bool is_whitespace(char c);
 bool is_alphabetic(char c);
-bool is_numeric(char c);
+bool is_hexadecimal_letter(char c);
+bool is_decimal_digit(char c);
+bool is_binary_digit(char c);
+bool is_octal_digit(char c);
+bool is_hexadecimal_digit(char c);
+bool is_base_compatible_with(Number_Base base, Number_Base other);
+Number_Base get_digit_base(char c);
+bool is_alphanumeric(char c);
 Token_Kind get_keyword(std::string_view text);
 bool is_builtin(Token_Kind kind);
 
@@ -126,7 +142,7 @@ bool is_builtin(Token_Kind kind);
 // the heap allocated data for that buffer must live for the entire lifetime of the compiler.
 union Token_Data {
     std::string_view str; // A view into the source code file's string.
-    int64_t int_literal;
+    uint64_t int_literal;
     double float_literal;
     char char_literal;
 };
@@ -202,6 +218,7 @@ do {\
     Location location_in_compiler = { .line = (uint32_t)__LINE__, .column = 0 };\
     eprintln_path(__FILE__, location_in_compiler);\
     eprintln("");\
+    debug_break();\
     std::exit(1);\
 } while(0)
 
@@ -212,6 +229,7 @@ do {\
     eprintln(ESC_CODE_RESET);\
     (lexer).print_error_message_line(location);\
     eprintln("");\
+    debug_break();\
     std::exit(1);\
 } while(0)
 
@@ -247,17 +265,30 @@ struct Lexer {
         return cursor >= source.size();
     }
 
+    // Returns a substring in the range [start, end)
+    constexpr std::string_view slice_source(size_t start, size_t end) const
+    {
+        if ((start > end) || (end > source.size())) {
+            return {};
+        }
+        return source.substr(start, end - start);
+    }
+
     constexpr const Token &get_token(Token_ID id) const { return token_pool.get(id); }
     constexpr       Token &get_token(Token_ID id)       { return token_pool.get(id); }
 
     Token_ID push_token(Token_Kind kind, Location loc);
     Token_ID push_token(Token_Kind kind, Location loc, Token_Data data);
+    double parse_f64(std::string_view number_text, Location loc);
+    uint64_t parse_u64(std::string_view number_text, Location loc, int base);
+    std::string unescape(std::string_view text, Location loc);
     void advance(size_t count);
     void skip_whitespace();
     void print_error_message_line(Location error_location);
     void print_token_stream();
     void lex();
     void lex_identifier();
+    void consume_digits(Number_Base base);
     void lex_number_literal();
     void lex_char_literal();
     void lex_string_literal();
