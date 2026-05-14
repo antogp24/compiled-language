@@ -3,6 +3,35 @@
 #include <unordered_map>
 #include <charconv>
 
+std::string escape_char(char c)
+{
+    switch (c) {
+    case '\'': return "\\\'"; // Single Quote
+    case '\"': return "\\\""; // Double Quote
+    case '\a': return "\\a"; // Terminal Bell
+    case '\b': return "\\b"; // Backspace
+    case '\t': return "\\t"; // Horizontal TAB
+    case '\v': return "\\v"; // Vertical TAB
+    case '\n': return "\\n"; // Linefeed
+    case '\f': return "\\f"; // Formfeed
+    case '\r': return "\\r"; // Carriage return
+    case '\x1b': return "\\x1b"; break; // ESC
+    default:
+        return std::string(1, c);
+    }
+}
+
+std::string escape_string(std::string_view text)
+{
+    const size_t len = text.size();
+    std::string escaped = {};
+
+    for (size_t i = 0; i < len; ++i) {
+        escaped.append(escape_char(text[i]));
+    }
+    return escaped;
+}
+
 std::string read_entire_file(std::string_view path)
 {
     std::ifstream file((std::string)path, std::ios::binary);
@@ -123,6 +152,7 @@ Token_Kind get_keyword(std::string_view text)
         Token_Kind value;
     };
     static Pair table[] = {
+        // Keywords.
         {.key = "break", .value = Token_Kind::Break },
         {.key = "cast", .value = Token_Kind::Cast },
         {.key = "continue", .value = Token_Kind::Continue },
@@ -136,6 +166,7 @@ Token_Kind get_keyword(std::string_view text)
         {.key = "struct", .value = Token_Kind::Struct },
         {.key = "union", .value = Token_Kind::Union },
         {.key = "while", .value = Token_Kind::While },
+        // Built-in types.
         {.key = "void", .value = Token_Kind::Void },
         {.key = "bool", .value = Token_Kind::Bool },
         {.key = "char", .value = Token_Kind::Char },
@@ -394,23 +425,18 @@ do{\
 #define push_op(repeated_char, op_op_equal, op_op, op_equal, op)\
 do{\
     Option<char> next = peek_next();\
-    if (next.is_some()) {\
-        switch (next.unwrap()) {\
-        case repeated_char: {\
-            advance(1);\
-            if (peek_next() == Some('=')) {\
-                push_token(Token_Kind::op_op_equal, location);\
-                advance(2);\
-            } else {\
-                push_token(Token_Kind::op_op, location);\
-                advance(1);\
-            }\
-        } break;\
-        case '=': {\
-            push_token(Token_Kind::op_equal, location);\
+    if (next == Some(repeated_char)) {\
+        advance(1);\
+        if (peek_next() == Some('=')) {\
+            push_token(Token_Kind::op_op_equal, location);\
             advance(2);\
-        } break;\
+        } else {\
+            push_token(Token_Kind::op_op, location);\
+            advance(1);\
         }\
+    } else if (next == Some('=')) {\
+        push_token(Token_Kind::op_equal, location);\
+        advance(2);\
     } else {\
         push_token(Token_Kind::op, location);\
         advance(1);\
@@ -508,13 +534,18 @@ void Lexer::consume_digits(Number_Base base)
 
 void Lexer::lex_number_literal()
 {
+    Assert(is_decimal_digit(source[cursor]));
     Location loc = location;
     size_t start = cursor;
 
     Number_Base base = Number_Base::Decimal; // The default is decimal.
 
     // Handling support 0x, 0b and 0o prefixes for integers.
-    if (source[cursor] == '0') {
+    if (source[cursor] == '0' &&
+        (peek_next() == Some('b') ||
+         peek_next() == Some('o') ||
+         peek_next() == Some('x')))
+    {
         advance(1); // consume the leading 0.
         char prefix = source[cursor];
         switch (prefix) {
@@ -577,7 +608,26 @@ void Lexer::lex_char_literal()
 
 void Lexer::lex_string_literal()
 {
-    feature_todo(*this, location, "String literal");
+    Location loc = location;
+    Assert(source[cursor] == '"');
+    advance(1); // consume the first '"'
+
+    size_t start = cursor;
+    while (!is_eof() && source[cursor] != '"') {
+        if (source[cursor] == '\\') {
+            advance(1); // consume escape sequence (could be '\''
+        }
+        advance(1);
+    }
+    if (is_eof()) {
+        error_at(*this, loc, "Unterminated String literal.");
+    }
+
+    std::string_view string_literal_text = slice_source(start, cursor);
+    push_token(Token_Kind::String_Literal, loc, Token_Data{ .str = string_literal_text });
+
+    Assert(source[cursor] == '"');
+    advance(1); // consume the last '"'
 }
 
 void Lexer::lex_multiline_comment()

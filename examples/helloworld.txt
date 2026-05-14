@@ -1,6 +1,39 @@
 // single line comment
 a = 0xff * 0b10 + 6 - 7 - 0o17;
 b = '\n' + 69.420;
+print("hello world");
+
+struct Rect2D {
+	top_left: vec2,
+	size: vec2,
+}
+
+struct Player {
+	collider: Rect2D,
+	hp: int,
+	texture_id: int,
+}
+
+fn damage(self: *Player, value: int) -> bool {
+	self.hp -= value;
+	self.hp = max(self.hp, 0);
+	return self.hp > 0;
+}
+
+fn main() {
+	let player = Player{
+		.hp = random_int(1, 20),
+	};
+	let alive_after_damage = damage(&player, 5);
+
+	if alive_after_damage {
+		println("Player is alive");
+		exit(0);
+	} else {
+		println("Player was killed");
+		exit(1);
+	}
+}
 
 /*
  * multiline comment

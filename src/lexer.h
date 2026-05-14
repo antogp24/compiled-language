@@ -122,6 +122,8 @@ enum class Number_Base : int {
     Hexadecimal = 16,
 };
 
+std::string escape_char(char c);
+std::string escape_string(std::string_view text);
 std::string read_entire_file(std::string_view path);
 size_t get_digit_count(size_t x);
 void pretty_print_line(std::string_view line, Location location);
@@ -174,7 +176,7 @@ struct std::formatter<Token> {
         case Token_Kind::Char_Literal:
             return std::format_to(ctx.out(),
                 "Token{{kind=Char_Literal, value=\'{}\'}}",
-                token.data.char_literal);
+                escape_char(token.data.char_literal));
         case Token_Kind::Int_Literal:
             return std::format_to(ctx.out(),
                 "Token{{kind=Int_Literal, value={}}}",
