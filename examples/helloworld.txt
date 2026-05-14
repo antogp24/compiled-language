@@ -1,2 +1,13 @@
+// single line comment
 a = 0xff * 0b10 + 6 - 7 - 0o17;
 b = '\n' + 69.420;
+
+/*
+ * multiline comment
+ */
+
+/*
+    /*
+     * nested multiline comment
+     */
+ */

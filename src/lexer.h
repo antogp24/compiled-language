@@ -292,5 +292,6 @@ struct Lexer {
     void lex_number_literal();
     void lex_char_literal();
     void lex_string_literal();
+    void lex_multiline_comment();
     void lex_slash();
 };

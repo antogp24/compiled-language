@@ -431,6 +431,7 @@ do{\
             switch (c) {
             case '\'': lex_char_literal(); break;
             case '\"': lex_string_literal(); break;
+            case '/': lex_slash(); break;
             case '#': push_single(Hash); break;
             case '$': push_single(DollarSign); break;
             case '(': push_single(ParenLeft); break;
@@ -579,7 +580,55 @@ void Lexer::lex_string_literal()
     feature_todo(*this, location, "String literal");
 }
 
+void Lexer::lex_multiline_comment()
+{
+    Location loc = location;
+    Assert(source[cursor] == '/' && peek_next() == Some('*'));
+    advance(2); // consume the '/*'
+
+    while (!is_eof() && !(source[cursor] == '*' && peek_next() == Some('/'))) {
+        if (source[cursor] == '/' && peek_next() == Some('*')) {
+            lex_multiline_comment(); // Nested multiline comments.
+        } else {
+            advance(1);
+        }
+    }
+    if (is_eof()) {
+        error_at(*this, loc, "Unterminated multiline comment.");
+    }
+    advance(2); // Consume the */
+}
+
 void Lexer::lex_slash()
 {
-    feature_todo(*this, location, "Slash");
+    Assert(source[cursor] == '/');
+
+    Option<char> next = peek_next();
+    if (next.is_some()) {
+        char c = next.unwrap();
+        switch (c) {
+        case '/': {
+            // Single line comment.
+            advance(2); // consume both slashes.
+            while (!is_eof() && source[cursor] != '\n') {
+                advance(1);
+            }
+            if (source[cursor] == '\n') {
+                advance(1);
+            }
+        } break;
+        case '*':
+            lex_multiline_comment();
+            break;
+        case '=':
+            push_token(Token_Kind::DivEqual, location);
+            advance(2);
+            break;
+        default:
+            error_at(*this, location, "Unrecognized token \"/{}\"", c);
+        }
+    } else {
+        push_token(Token_Kind::Div, location);
+        advance(1);
+    }
 }
