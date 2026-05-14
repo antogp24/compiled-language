@@ -1,6 +1,8 @@
-#include <print>
+#include "lexer.h"
 
 int main(void)
 {
-    std::println("Hello future compiled language");
+    Lexer lexer("examples/helloworld.txt");
+    lexer.lex();
+    lexer.print_token_stream();
 }

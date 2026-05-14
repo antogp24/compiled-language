@@ -15,6 +15,7 @@ This is an academic project, and for **learning purposes**.
 - For simplicity it uses mostly the stack, not registers.
 - It increases the stack size passing a flag to the assembler.
 - It does not optimize the code at all.
+- No module system. Programs can only be a single file.
 
 ## Features that I will add
 - Primitive data types. 
@@ -37,8 +38,7 @@ This is an academic project, and for **learning purposes**.
 	- Order of their definitions doesn't matter to the compiler.
 - Vector types and Matrix types with operators and built-in functions.
 	- vec2, vec3, vec4 (all floating-point).
-	- mat2, mat3, mat4 (all floating-point).
-- No module system. Programs can only be single file.
+	- Only mat4 (floating-point).
 
 ## Possible Syntax
 ```rust
