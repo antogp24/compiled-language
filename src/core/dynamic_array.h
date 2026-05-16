@@ -9,9 +9,20 @@
 
 template <typename T>
 struct Dynamic_Array {
-    T *items;
-    size_t count;
-    size_t capacity;
+    T *items = nullptr;
+    size_t count = 0;
+    size_t capacity = 0;
+
+    Dynamic_Array()
+    {
+    }
+
+    ~Dynamic_Array()
+    {
+        if (items) {
+            free(items);
+        }
+    }
 
     static constexpr float GROWTH_FACTOR = 1.5f;
     static constexpr size_t DEFAULT_CAPACITY = 8;
@@ -60,10 +71,5 @@ struct Dynamic_Array {
     {
         resizeIfNeeded(1);
         items[count++] = element;
-    }
-
-    void destroy()
-    {
-        free(items);
     }
 };

@@ -4,11 +4,11 @@
 #include <cstdint>
 #include <cstdlib> // std::exit
 #include <string>
-#include <string_view>
 #include <magic_enum/magic_enum.hpp>
 #include <debug_break.h>
 #include "core/pool.h"
 #include "core/option.h"
+#include "core/string.h"
 
 struct Location {
     uint32_t line;
@@ -24,6 +24,7 @@ enum class Token_Kind {
     // NOTE: If you modify this, please modify get_keyword() too.
     Break,
     Cast,
+    Const,
     Continue,
     Else,
     Enum,
@@ -67,6 +68,7 @@ enum class Token_Kind {
 
     // Symbols
     Hash,            // #
+    HashQuote,       // #'
     DollarSign,      // $
     ParenLeft,       // (
     ParenRight,      // )
@@ -123,10 +125,10 @@ enum class Number_Base : int {
 };
 
 std::string escape_char(char c);
-std::string escape_string(std::string_view text);
-std::string read_entire_file(std::string_view path);
+std::string escape_string(String_View text);
+std::string read_entire_file(String_View path);
 size_t get_digit_count(size_t x);
-void pretty_print_line(std::string_view line, Location location);
+void pretty_print_line(String_View line, Location location);
 bool is_whitespace(char c);
 bool is_alphabetic(char c);
 bool is_hexadecimal_letter(char c);
@@ -137,25 +139,23 @@ bool is_hexadecimal_digit(char c);
 bool is_base_compatible_with(Number_Base base, Number_Base other);
 Number_Base get_digit_base(char c);
 bool is_alphanumeric(char c);
-Token_Kind get_keyword(std::string_view text);
+Token_Kind get_keyword(String_View text);
 bool is_builtin(Token_Kind kind);
 
 // NOTE: Since the string literal depends on the lifetime of the input file source code,
 // the heap allocated data for that buffer must live for the entire lifetime of the compiler.
-union Token_Data {
-    std::string_view str; // A view into the source code file's string.
+union Token_Variant {
+    String_View str; // A view into the source code file's string.
     uint64_t int_literal;
     double float_literal;
     char char_literal;
 };
 
 struct Token {
-    Token_Data data;
+    Token_Variant data;
     Location location;
     Token_Kind kind;
 };
-
-using Token_ID = Pool_ID;
 
 template <>
 struct std::formatter<Token> {
@@ -238,25 +238,26 @@ do {\
 using Token_Pool = Pool<Token, 1024>;
 
 struct Lexer {
-    std::unordered_map<uint32_t, std::string_view> line_map = {};
-    std::string buffer_of_source_code = {}; // Fuck std::string::substr, it returns a std::string instead of std::string_view.
-    Token_Pool token_pool = {};
-    std::string_view source = {}; // A view into the buffer for the source code.
-    std::string_view filename = {};
+    std::unordered_map<uint32_t, String_View> line_map = {}; // Maps line number to the string view of that line.
+    std::string buffer_of_source_code = {}; // Fuck std::string::substr, it returns a std::string instead of String_View.
+    Token_Pool token_pool = {}; // An ordered pool of tokens.
+    String_View source = {}; // A view into the buffer for the source code.
+    String_View filename = {}; // Path of the source code's file.
     Location location = { .line = 1, .column = 0 };
-    size_t cursor = 0;
-    size_t current_line_start = 0;
+    size_t cursor = 0; // Byte offset of the current character into the source code.
+    size_t current_line_start = 0; // Byte offset of the current line into the source code.
 
-    Lexer(std::string_view path)
+    Lexer(String_View path)
         : filename(path)
     {
         buffer_of_source_code = read_entire_file(path);
-        source = buffer_of_source_code;
+        source.data = buffer_of_source_code.data();
+        source.length = buffer_of_source_code.size();
     }
 
     constexpr Option<char> peek_next() const
     {
-        if (cursor + 1 < source.size()) {
+        if (cursor + 1 < source.length) {
             return Some(source[cursor + 1]);
         }
         return None(char);
@@ -264,26 +265,14 @@ struct Lexer {
 
     constexpr bool is_eof() const
     {
-        return cursor >= source.size();
+        return cursor >= source.length;
     }
 
-    // Returns a substring in the range [start, end)
-    constexpr std::string_view slice_source(size_t start, size_t end) const
-    {
-        if ((start > end) || (end > source.size())) {
-            return {};
-        }
-        return source.substr(start, end - start);
-    }
-
-    constexpr const Token &get_token(Token_ID id) const { return token_pool.get(id); }
-    constexpr       Token &get_token(Token_ID id)       { return token_pool.get(id); }
-
-    Token_ID push_token(Token_Kind kind, Location loc);
-    Token_ID push_token(Token_Kind kind, Location loc, Token_Data data);
-    double parse_f64(std::string_view number_text, Location loc);
-    uint64_t parse_u64(std::string_view number_text, Location loc, int base);
-    std::string unescape(std::string_view text, Location loc);
+    void push_token(Token_Kind kind, Location loc);
+    void push_token(Token_Kind kind, Location loc, Token_Variant data);
+    double parse_f64(String_View number_text, Location loc);
+    uint64_t parse_u64(String_View number_text, Location loc, int base);
+    std::string unescape(String_View text, Location loc);
     void advance(size_t count);
     void skip_whitespace();
     void print_error_message_line(Location error_location);

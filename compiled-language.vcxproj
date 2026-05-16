@@ -137,6 +137,7 @@
   <ItemGroup>
     <ClCompile Include="src\lexer.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\parser.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
@@ -144,9 +145,12 @@
   <ItemGroup>
     <ClInclude Include="src\core\assertions.h" />
     <ClInclude Include="src\core\dynamic_array.h" />
+    <ClInclude Include="src\core\linked_list.h" />
+    <ClInclude Include="src\core\string.h" />
     <ClInclude Include="src\lexer.h" />
     <ClInclude Include="src\core\option.h" />
     <ClInclude Include="src\core\pool.h" />
+    <ClInclude Include="src\parser.h" />
     <ClInclude Include="vendor\debug_break\include\debug_break.h" />
     <ClInclude Include="vendor\magic_enum\include\magic_enum\magic_enum.hpp" />
   </ItemGroup>

@@ -8,3 +8,5 @@
 #else
 #   define Assert(x) do { if (!(x)) { debug_break(); } assert(x); } while(0)
 #endif
+
+#define unreachable() Assert(!"Unreachable")

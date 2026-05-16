@@ -21,20 +21,19 @@ std::string escape_char(char c)
     }
 }
 
-std::string escape_string(std::string_view text)
+std::string escape_string(String_View text)
 {
-    const size_t len = text.size();
     std::string escaped = {};
 
-    for (size_t i = 0; i < len; ++i) {
+    for (size_t i = 0; i < text.length; ++i) {
         escaped.append(escape_char(text[i]));
     }
     return escaped;
 }
 
-std::string read_entire_file(std::string_view path)
+std::string read_entire_file(String_View path)
 {
-    std::ifstream file((std::string)path, std::ios::binary);
+    std::ifstream file(path.to_std_string(), std::ios::binary);
     if (!file) {
         std::println(
             ESC_CODE_RED_BOLD "error" ESC_CODE_RESET
@@ -60,12 +59,13 @@ size_t get_digit_count(size_t x)
     return (size_t)std::floor(std::log10(x)) + 1;
 }
 
-void pretty_print_line(std::string_view line, Location location)
+void pretty_print_line(String_View line, Location location)
 {
     size_t line_number_digit_count = get_digit_count(location.line);
     eprintln("{:>{}} | ", ' ', line_number_digit_count);
     eprintln("{} | {}", location.line, line);
-    eprintln("{:>{}} | {:>{}}", ' ', line_number_digit_count, '^', location.column + 1);
+    eprintln("{:>{}} | " ESC_CODE_YELLOW "{:>{}}" ESC_CODE_RESET,
+        ' ', line_number_digit_count, '^', location.column + 1);
 };
 
 // I don't use isspace because it has undefined behaviour for certain inputs.
@@ -139,7 +139,7 @@ bool is_alphanumeric(char c)
     return is_alphabetic(c) || is_decimal_digit(c);
 }
 
-Token_Kind get_keyword(std::string_view text)
+Token_Kind get_keyword(String_View text)
 {
     // O(n) implementation.
 
@@ -155,6 +155,7 @@ Token_Kind get_keyword(std::string_view text)
         // Keywords.
         {.key = "break", .value = Token_Kind::Break },
         {.key = "cast", .value = Token_Kind::Cast },
+        {.key = "const", .value = Token_Kind::Const },
         {.key = "continue", .value = Token_Kind::Continue },
         {.key = "else", .value = Token_Kind::Else },
         {.key = "enum", .value = Token_Kind::Enum },
@@ -189,7 +190,8 @@ Token_Kind get_keyword(std::string_view text)
         {.key = "mat4", .value = Token_Kind::Mat4 },
     };
     for (const Pair &pair : table) {
-        if (text.compare(pair.key) == 0) {
+        String_View key = String_View::from_cstr(pair.key);
+        if (text.equals(key)) {
             return pair.value;
         }
     }
@@ -225,31 +227,27 @@ bool is_builtin(Token_Kind kind)
     return false;
 }
 
-Token_ID Lexer::push_token(Token_Kind kind, Location loc)
+void Lexer::push_token(Token_Kind kind, Location loc)
 {
-    Token_ID id = token_pool.allocate();
-    Token &token = token_pool.get(id);
-    token.kind = kind;
-    token.location = loc;
-    return id;
+    Token *token = token_pool.append();
+    token->kind = kind;
+    token->location = loc;
 }
 
-Token_ID Lexer::push_token(Token_Kind kind, Location loc, Token_Data data)
+void Lexer::push_token(Token_Kind kind, Location loc, Token_Variant data)
 {
-    Token_ID id = token_pool.allocate();
-    Token &token = token_pool.get(id);
-    token.kind = kind;
-    token.location = loc;
-    token.data = data;
-    return id;
+    Token *token = token_pool.append();
+    token->kind = kind;
+    token->location = loc;
+    token->data = data;
 }
 
-double Lexer::parse_f64(std::string_view number_text, Location loc)
+double Lexer::parse_f64(String_View number_text, Location loc)
 {
     double value = 0.0;
     std::from_chars_result result = std::from_chars(
-        number_text.data(),
-        number_text.data() + number_text.size(),
+        number_text.data,
+        number_text.data + number_text.length,
         value);
 
 #pragma warning(push)
@@ -272,12 +270,12 @@ double Lexer::parse_f64(std::string_view number_text, Location loc)
 #pragma warning(pop)
 }
 
-uint64_t Lexer::parse_u64(std::string_view number_text, Location loc, int base)
+uint64_t Lexer::parse_u64(String_View number_text, Location loc, int base)
 {
     uint64_t value = 0;
     std::from_chars_result result = std::from_chars(
-        number_text.data(),
-        number_text.data() + number_text.size(),
+        number_text.data,
+        number_text.data + number_text.length,
         value,
         base);
 
@@ -301,18 +299,17 @@ uint64_t Lexer::parse_u64(std::string_view number_text, Location loc, int base)
 #pragma warning(pop)
 }
 
-std::string Lexer::unescape(std::string_view text, Location loc)
+std::string Lexer::unescape(String_View text, Location loc)
 {
     // As a reference, take a look at this:
     // https://gist.github.com/ConnerWill/d4b6c776b509add763e17f9f113fd25b
 
-    const size_t len = text.size();
     std::string unescaped = {};
 
-    for (size_t i = 0; i < len;) {
+    for (size_t i = 0; i < text.length;) {
         if (text[i] == '\\') {
             i++; // consume the '\\'
-            if (i >= len) {
+            if (i >= text.length) {
                 error_at(*this, loc, "Unterminated escape sequence.");
             }
             switch (text[i]) {
@@ -328,10 +325,10 @@ std::string Lexer::unescape(std::string_view text, Location loc)
             case 'x': {
                 i++; // consume the 'x'
                 size_t start = i;
-                while (i < len && is_hexadecimal_digit(text[i])) {
+                while (i < text.length && is_hexadecimal_digit(text[i])) {
                     i++;
                 }
-                std::string_view hex_number_text = text.substr(start, i - start);
+                String_View hex_number_text = text.slice(start, i);
                 uint64_t hex = parse_u64(hex_number_text, loc, 16);
                 char least_significant_byte = (char)(hex & 0xff);
                 unescaped.push_back(least_significant_byte);
@@ -352,7 +349,7 @@ void Lexer::advance(size_t count)
 {
     for (size_t i = 0; !is_eof() && i < count; ++i) {
         if (source[cursor] == '\n') {
-            std::string_view this_line = slice_source(current_line_start, cursor);
+            String_View this_line = source.slice(current_line_start, cursor);
             line_map.insert({ location.line, this_line });
             location.line++;
             location.column = 0;
@@ -458,7 +455,7 @@ do{\
             case '\'': lex_char_literal(); break;
             case '\"': lex_string_literal(); break;
             case '/': lex_slash(); break;
-            case '#': push_single(Hash); break;
+            case '#': push_if('\'', HashQuote, Hash); break;
             case '$': push_single(DollarSign); break;
             case '(': push_single(ParenLeft); break;
             case ')': push_single(ParenRight); break;
@@ -509,11 +506,11 @@ void Lexer::lex_identifier()
             break;
         }
     }
-    std::string_view identifier_name = slice_source(start, cursor);
+    String_View identifier_name = source.slice(start, cursor);
     Token_Kind kind = get_keyword(identifier_name);
 
     if (kind == Token_Kind::None) {
-        push_token(Token_Kind::Identifier, loc, Token_Data{ .str = identifier_name });
+        push_token(Token_Kind::Identifier, loc, Token_Variant{ .str = identifier_name });
     } else {
         push_token(kind, loc); // It's a keyword.
     }
@@ -564,13 +561,13 @@ void Lexer::lex_number_literal()
         advance(1); // consume the dot.
         consume_digits(base); // trailing digits.
 
-        std::string_view float_number_text = slice_source(start, cursor);
+        String_View float_number_text = source.slice(start, cursor);
         double float_value = parse_f64(float_number_text, loc);
-        push_token(Token_Kind::Float_Literal, loc, Token_Data{ .float_literal = float_value });
+        push_token(Token_Kind::Float_Literal, loc, Token_Variant{ .float_literal = float_value });
     } else {
-        std::string_view integer_number_text = slice_source(start, cursor);
+        String_View integer_number_text = source.slice(start, cursor);
         uint64_t integer_value = parse_u64(integer_number_text, loc, (int)base);
-        push_token(Token_Kind::Int_Literal, loc, Token_Data{ .int_literal = integer_value });
+        push_token(Token_Kind::Int_Literal, loc, Token_Variant{ .int_literal = integer_value });
     }
 }
 
@@ -591,7 +588,7 @@ void Lexer::lex_char_literal()
         error_at(*this, loc, "Unterminated Char literal.");
     }
 
-    std::string_view escaped_char_text = slice_source(start, cursor);
+    String_View escaped_char_text = source.slice(start, cursor);
     std::string unescaped = unescape(escaped_char_text, loc);
 
     if (unescaped.size() == 0) {
@@ -600,7 +597,7 @@ void Lexer::lex_char_literal()
         error_at(*this, loc, "More than one character in Char literal.");
     }
     char char_literal = unescaped[0];
-    push_token(Token_Kind::Char_Literal, loc, Token_Data{ .char_literal = char_literal });
+    push_token(Token_Kind::Char_Literal, loc, Token_Variant{ .char_literal = char_literal });
 
     Assert(source[cursor] == '\'');
     advance(1); // consume the last '\''
@@ -623,8 +620,8 @@ void Lexer::lex_string_literal()
         error_at(*this, loc, "Unterminated String literal.");
     }
 
-    std::string_view string_literal_text = slice_source(start, cursor);
-    push_token(Token_Kind::String_Literal, loc, Token_Data{ .str = string_literal_text });
+    String_View string_literal_text = source.slice(start, cursor);
+    push_token(Token_Kind::String_Literal, loc, Token_Variant{ .str = string_literal_text });
 
     Assert(source[cursor] == '"');
     advance(1); // consume the last '"'

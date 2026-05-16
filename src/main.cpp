@@ -1,4 +1,5 @@
 #include "lexer.h"
+#include "parser.h"
 
 std::string_view get_exe_name(std::string_view executable_path);
 
@@ -8,10 +9,12 @@ int main(int argc, char *argv[])
         eprintln("usage: {} code.txt", get_exe_name(argv[0]));
         std::exit(1);
     }
-    std::string_view code_path = argv[1];
-    Lexer lexer(code_path);
+    const char* code_path = argv[1];
+    Lexer lexer(String_View::from_cstr(code_path));
     lexer.lex();
     lexer.print_token_stream();
+    Parser parser(&lexer);
+    parser.parse();
 }
 
 std::string_view get_exe_name(std::string_view executable_path)
