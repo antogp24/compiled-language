@@ -32,6 +32,7 @@ enum class Token_Kind {
     For,
     If,
     Let,
+    Loop,
     Return,
     Struct,
     Union,
@@ -67,6 +68,7 @@ enum class Token_Kind {
     String_Literal,
 
     // Symbols
+    Arrow,           // ->
     Hash,            // #
     HashQuote,       // #'
     DollarSign,      // $
@@ -213,7 +215,7 @@ struct std::formatter<Token> {
 #define feature_todo(lexer, location, feature_name)\
 do {\
     eprintln("\n" ESC_CODE_RED_BOLD "TODO" ESC_CODE_RESET ":"\
-        ESC_CODE_RED " Feature {} is unimplemented" ESC_CODE_RESET,\
+        ESC_CODE_RED " Feature \"{}\" is unimplemented." ESC_CODE_RESET,\
         (feature_name));\
     (lexer).print_error_message_line(location);\
     eprint(ESC_CODE_YELLOW "INFO" ESC_CODE_RESET ": implementation should go here: ");\

@@ -24,7 +24,7 @@ struct String_View {
 
     constexpr const char& operator[](size_t index) const
     {
-        Assert(index < length);
+        debug_assert(index < length);
         return data[index];
     }
 
@@ -51,6 +51,7 @@ struct String_View {
         return { cstr, strlen(cstr) };
     }
 };
+static_assert(std::is_aggregate_v<String_View>);
 
 template <>
 struct std::formatter<String_View> {

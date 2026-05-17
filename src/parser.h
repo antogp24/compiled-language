@@ -3,7 +3,6 @@
 #include "lexer.h"
 #include "core/dynamic_array.h"
 #include <unordered_map>
-#include <variant>
 #include <string>
 
 
@@ -25,24 +24,27 @@ struct Expr {
 
 enum class Type_Annotation_Kind {
     None,
-    UserDefined, // Structs, unions, enums defined by the program.
-    Builtin, // It includes primitives, strings and math types.
     Array,
-    Slice,
+    Builtin, // It includes primitives, strings and math types.
     Pointer,
+    Slice,
+    Tuple,
+    UserDefined, // Structs, unions, enums defined by the program.
 };
 
 struct Type_Annotation {
     union {
-        struct { String_View name; } user_defined; // examples: Entity, Player
+        struct { const Type_Annotation *p_annotation; size_t count; } array; // examples: [2]f32, [4]string
         struct { Token_Kind keyword; } builtin; // examples: i32, mat4, string
-        struct { Type_Annotation *annotation; size_t count; } array; // examples: [2]f32, [4]string
-        struct { Type_Annotation *annotation; } slice; // examples: []string, []u8, []i32
-        struct { Type_Annotation *annotation; } pointer; // examples: *u8, *void, *Entity
+        struct { const Type_Annotation *p_annotation; } pointer; // examples: *u8, *void, *Entity
+        struct { const Type_Annotation *p_annotation; } slice; // examples: []string, []u8, []i32
+        struct { Dynamic_Array<Type_Annotation> types; } tuple; // examples: (i32, string), (*void, []u8, bool)
+        struct { String_View name; } user_defined; // examples: Entity, Player
     };
     Location location;
     Type_Annotation_Kind kind;
 };
+static_assert(std::is_aggregate_v<Type_Annotation>);
 
 struct Typed_Identifier_Group {
     Type_Annotation type_annotation;
@@ -79,33 +81,24 @@ struct Variable_Definition {
     bool is_const;
 };
 
-struct Stmt_Break {
-    Option<String_View> label;
-};
-
-struct Stmt_Continue {
-    Option<String_View> label;
-};
-
 struct Stmt;
 struct Stmt_Loop {
-    Option<String_View> label;
+    const Token* p_label; // nullptr indicates no label.
     Option<Variable_Definition> initializer;
     Option<Expr> condition;
     Option<Expr> after;
     Dynamic_Array<Stmt> body;
 };
 
-using Stmt_Variant = std::variant<
-    Stmt_Break,
-    Stmt_Continue,
-    Expr,
-    Stmt_Loop,
-    Dynamic_Array<Stmt>,
-    Variable_Definition>;
-
 struct Stmt {
-    Stmt_Variant variant;
+    union {
+        struct { const Token *p_label; /*nullptr indicates no label*/ } _break;
+        struct { const Token *p_label; /*nullptr indicates no label*/ } _continue;
+        Expr expr;
+        Stmt_Loop loop;
+        Dynamic_Array<Stmt> scope_block;
+        Variable_Definition variable_definition;
+    };
     Location location;
     Stmt_Kind kind;
 };
@@ -164,6 +157,7 @@ struct Parser {
     std::unordered_map<std::string, Union_Definition> union_definitions = {};
     std::unordered_map<std::string, Enum_Definition> enum_definitions = {};
     std::unordered_map<std::string, Variable_Definition> global_variable_definitions = {};
+    Pool<Type_Annotation, 256> type_annotation_pool = {};
     Token_Pool::Iterator cursor; // Token Pool iterator that is the current token.
     const Token *p_current_token = nullptr; // Has to be in sync with the cursor.
     Lexer *p_lexer = nullptr; // Pointer to the lexer that has all the tokens.
@@ -172,7 +166,7 @@ struct Parser {
         : cursor{lexer->token_pool.begin()}
         , p_lexer{lexer}
     {
-        Assert(cursor.id.block_node != nullptr && "The lexer must already have tokens.");
+        debug_assert(cursor.id.block_node != nullptr && "The lexer must already have tokens.");
         p_current_token = lexer->token_pool.get_ptr(cursor.id);
     }
 
@@ -187,20 +181,26 @@ struct Parser {
     }
 
     void advance(size_t count = 1);
-    Token consume(Token_Kind expected);
+    const Token *consume(Token_Kind expected);
     void parse();
     void parse_fn_def();
     void parse_struct_def();
     void parse_union_def();
     void parse_enum_def();
+    Variable_Definition parse_variable_definition();
     Stmt parse_stmt();
-    Stmt parse_variable_definition_stmt(bool is_const);
+    Stmt parse_variable_definition_stmt();
     Stmt parse_scope_block_stmt();
     Stmt parse_labeled_loop_stmt();
     Stmt parse_for_stmt(const Token *p_label = nullptr);
     Stmt parse_while_stmt(const Token *p_label = nullptr);
+    Stmt parse_loop_stmt(const Token *p_label = nullptr);
     Stmt parse_break_stmt();
     Stmt parse_continue_stmt();
     Stmt parse_expr_stmt();
     Dynamic_Array<Stmt> parse_scope_block();
+    Typed_Identifier_Group parse_typed_identifier_group();
+    Type_Annotation parse_type_annotation();
+    Function_Signature parse_function_signature();
+    Expr parse_expr();
 };

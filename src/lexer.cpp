@@ -163,6 +163,7 @@ Token_Kind get_keyword(String_View text)
         {.key = "for", .value = Token_Kind::For },
         {.key = "if", .value = Token_Kind::If },
         {.key = "let", .value = Token_Kind::Let },
+        {.key = "loop", .value = Token_Kind::Loop },
         {.key = "return", .value = Token_Kind::Return },
         {.key = "struct", .value = Token_Kind::Struct },
         {.key = "union", .value = Token_Kind::Union },
@@ -419,6 +420,20 @@ do{\
     }\
 }while (0)
 
+#define push_if_2(extra_char_1, token_if_extra_1, extra_char_2, token_if_extra_2, token_else)\
+do{\
+    if (peek_next() == Some(extra_char_1)) {\
+        push_token(Token_Kind::token_if_extra_1, location);\
+        advance(2);\
+    } else if (peek_next() == Some(extra_char_2)) {\
+        push_token(Token_Kind::token_if_extra_2, location);\
+        advance(2);\
+    } else {\
+        push_token(Token_Kind::token_else, location);\
+        advance(1);\
+    }\
+}while (0)
+
 #define push_op(repeated_char, op_op_equal, op_op, op_equal, op)\
 do{\
     Option<char> next = peek_next();\
@@ -468,7 +483,7 @@ do{\
             case '&': push_op('&', AndEqual, And, BitwiseAndEqual, Ampersand); break;
             case '^': push_if('=', BitwiseXorEqual, BitwiseXor); break;
             case '+': push_if('=', PlusEqual, Plus); break;
-            case '-': push_if('=', MinusEqual, Minus); break;
+            case '-': push_if_2('=', MinusEqual, '>', Arrow, Minus); break;
             case '*': push_if('=', StarEqual, Star); break;
             case '%': push_if('=', ModuloEqual, Modulo); break;
             case '<': push_op('<', ShiftLeftEqual, ShiftLeft, LessEqual, LessThan); break;
@@ -489,6 +504,7 @@ do{\
 
 #undef push_single
 #undef push_if
+#undef push_if_2
 #undef push_op
 }
 
@@ -531,7 +547,7 @@ void Lexer::consume_digits(Number_Base base)
 
 void Lexer::lex_number_literal()
 {
-    Assert(is_decimal_digit(source[cursor]));
+    debug_assert(is_decimal_digit(source[cursor]));
     Location loc = location;
     size_t start = cursor;
 
@@ -574,7 +590,7 @@ void Lexer::lex_number_literal()
 void Lexer::lex_char_literal()
 {
     Location loc = location;
-    Assert(source[cursor] == '\'');
+    debug_assert(source[cursor] == '\'');
     advance(1); // consume the first '
 
     size_t start = cursor;
@@ -599,14 +615,14 @@ void Lexer::lex_char_literal()
     char char_literal = unescaped[0];
     push_token(Token_Kind::Char_Literal, loc, Token_Variant{ .char_literal = char_literal });
 
-    Assert(source[cursor] == '\'');
+    debug_assert(source[cursor] == '\'');
     advance(1); // consume the last '\''
 }
 
 void Lexer::lex_string_literal()
 {
     Location loc = location;
-    Assert(source[cursor] == '"');
+    debug_assert(source[cursor] == '"');
     advance(1); // consume the first '"'
 
     size_t start = cursor;
@@ -623,14 +639,14 @@ void Lexer::lex_string_literal()
     String_View string_literal_text = source.slice(start, cursor);
     push_token(Token_Kind::String_Literal, loc, Token_Variant{ .str = string_literal_text });
 
-    Assert(source[cursor] == '"');
+    debug_assert(source[cursor] == '"');
     advance(1); // consume the last '"'
 }
 
 void Lexer::lex_multiline_comment()
 {
     Location loc = location;
-    Assert(source[cursor] == '/' && peek_next() == Some('*'));
+    debug_assert(source[cursor] == '/' && peek_next() == Some('*'));
     advance(2); // consume the '/*'
 
     while (!is_eof() && !(source[cursor] == '*' && peek_next() == Some('/'))) {
@@ -648,7 +664,7 @@ void Lexer::lex_multiline_comment()
 
 void Lexer::lex_slash()
 {
-    Assert(source[cursor] == '/');
+    debug_assert(source[cursor] == '/');
 
     Option<char> next = peek_next();
     if (next.is_some()) {

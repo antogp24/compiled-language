@@ -1,46 +1,49 @@
 struct Rect2D {
-	top_left: vec2,
-	size: vec2,
+    top_left: vec2,
+    size: vec2,
 }
 
 struct Player {
-	collider: Rect2D,
-	hp: i32,
-	texture_id: u32,
+    collider: Rect2D,
+    hp: i32,
+    texture_id: u32,
 }
 
-const NUM_PLAYERS: i32 = 1;
-let players = [NUM_PLAYERS]Player{
-	Player{ .hp = 65 },
+enum Test_Enum { A, B, C, D }
+
+fn test() {
+    #'some_loop: loop {
+        break some_loop;
+    }
+
+    // single line comment
+    let a = 0xff * 0b10 + 6 - 7 - 0o17;
+    let b = '\n' + 69.420;
+    print("hello world");
+    print(a + b);
+
+    let player = &players[0];
+    let alive_after_damage = damage(player, 5);
+}
+
+let players = [1]Player{
+    Player{ .hp = 65 },
 };
 
 fn damage(self: *Player, value: int) -> bool {
-	self.hp -= value;
-	self.hp = max(self.hp, 0);
-	return self.hp > 0;
+    self.hp -= value;
+    self.hp = max(self.hp, 0);
+    return self.hp > 0;
 }
 
 fn main() {
-	// single line comment
-	let a = 0xff * 0b10 + 6 - 7 - 0o17;
-	let b = '\n' + 69.420;
-	print("hello world");
-	print(a + b);
-
-	let player = &players[0];
-	let alive_after_damage = damage(player, 5);
-
-	#'some_loop: while (true) {
-		break some_loop;
-	}
-
-	if alive_after_damage {
-		println("Player is alive");
-		exit(0);
-	} else {
-		println("Player was killed");
-		exit(1);
-	}
+    if alive_after_damage {
+        println("Player is alive");
+        exit(0);
+    } else {
+        println("Player was killed");
+        exit(1);
+    }
 }
 
 /*

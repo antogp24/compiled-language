@@ -41,8 +41,8 @@ public:
         return head == nullptr;
     }
 
-    constexpr const T &get_last() const { Assert(tail); return tail->data; }
-    constexpr       T &get_last()       { Assert(tail); return tail->data; }
+    constexpr const T &get_last() const { debug_assert(tail); return tail->data; }
+    constexpr       T &get_last()       { debug_assert(tail); return tail->data; }
 
     void append(const T &element)
     {

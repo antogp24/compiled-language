@@ -7,22 +7,13 @@
 #include <malloc.h>
 #include "assertions.h"
 
+// Unlike std::vector, it does not use RAII.
+// It explicitly expects the user to call the destroy function.
 template <typename T>
 struct Dynamic_Array {
-    T *items = nullptr;
-    size_t count = 0;
-    size_t capacity = 0;
-
-    Dynamic_Array()
-    {
-    }
-
-    ~Dynamic_Array()
-    {
-        if (items) {
-            free(items);
-        }
-    }
+    T *items;
+    size_t count;
+    size_t capacity;
 
     static constexpr float GROWTH_FACTOR = 1.5f;
     static constexpr size_t DEFAULT_CAPACITY = 8;
@@ -30,16 +21,16 @@ struct Dynamic_Array {
     constexpr T *data() const { return items; }
     constexpr bool is_empty() const { return count == 0; }
 
-    constexpr const T &operator[](size_t index) const { Assert(index < count); return items[index]; }
-    constexpr       T &operator[](size_t index)       { Assert(index < count); return items[index]; }
+    constexpr const T &operator[](size_t index) const { debug_assert(index < count); return items[index]; }
+    constexpr       T &operator[](size_t index)       { debug_assert(index < count); return items[index]; }
 
     constexpr const T &get_last() const { return operator[](count - 1); }
     constexpr       T &get_last()       { return operator[](count - 1); }
 
     void reserve(size_t initial_capacity)
     {
-        Assert(count == 0 && capacity == 0);
-        Assert(initial_capacity > 1);
+        debug_assert(count == 0 && capacity == 0);
+        debug_assert(initial_capacity > 1);
 
         capacity = initial_capacity;
         items = (T*)calloc(initial_capacity, sizeof(T));
@@ -51,13 +42,14 @@ struct Dynamic_Array {
             if (capacity == 0) {
                 capacity = DEFAULT_CAPACITY;
                 // This makes it so that realloc acts like malloc the first time something is appended.
-                Assert(items == nullptr); 
+                debug_assert(items == nullptr); 
             }
             while (count + added_element_count > capacity) {
+                debug_assert(capacity < (size_t)(capacity * GROWTH_FACTOR));
                 capacity = (size_t)(capacity * GROWTH_FACTOR);
             }
             items = (T*)realloc(items, capacity * sizeof(T));
-            Assert(items != nullptr);
+            debug_assert(items != nullptr);
         }
     }
 
@@ -71,5 +63,13 @@ struct Dynamic_Array {
     {
         resizeIfNeeded(1);
         items[count++] = element;
+    }
+
+    void destroy()
+    {
+        if (items) {
+            free(items);
+            items = nullptr;
+        }
     }
 };

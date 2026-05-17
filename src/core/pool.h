@@ -2,6 +2,8 @@
 
 #include "linked_list.h"
 
+// A linked list of memory blocks.
+// Pointers to objects returned by this data structure are stable.
 template <typename T, size_t Block_Item_Count>
 struct Pool {
     struct Block {
@@ -11,8 +13,8 @@ struct Pool {
         constexpr bool is_full() const { return item_count == Block_Item_Count; }
         constexpr bool in_bounds(uint32_t index) const { return index < item_count; }
 
-        constexpr const T &operator[](uint32_t index) const { Assert(in_bounds(index)); return items[index]; }
-        constexpr       T &operator[](uint32_t index)       { Assert(in_bounds(index)); return items[index]; }
+        constexpr const T &operator[](uint32_t index) const { debug_assert(in_bounds(index)); return items[index]; }
+        constexpr       T &operator[](uint32_t index)       { debug_assert(in_bounds(index)); return items[index]; }
     };
     using Node = Singly_Linked_List<Block>::Node;
     struct ID {
@@ -27,13 +29,13 @@ struct Pool {
 public:
     Singly_Linked_List<Block> blocks;
 
-    constexpr const T &get(ID id) const { Assert(id.block_node); return id.block_node->data[id.index_inside_block]; }
-    constexpr       T &get(ID id)       { Assert(id.block_node); return id.block_node->data[id.index_inside_block]; }
+    constexpr const T &get(ID id) const { debug_assert(id.block_node); return id.block_node->data[id.index_inside_block]; }
+    constexpr       T &get(ID id)       { debug_assert(id.block_node); return id.block_node->data[id.index_inside_block]; }
 
     constexpr T *get_ptr(ID id) const {
-        Assert(id.block_node);
+        debug_assert(id.block_node);
         Block &block = id.block_node->data;
-        Assert(block.in_bounds(id.index_inside_block));
+        debug_assert(block.in_bounds(id.index_inside_block));
         return &block.items[id.index_inside_block]; 
     }
 
@@ -56,7 +58,7 @@ public:
     // Required to be able to use this type as a custom allocator.
     T *allocate(size_t n)
     {
-        Assert(n == 1);
+        debug_assert(n == 1);
         return append();
     }
 
@@ -75,14 +77,14 @@ public:
 
         T &operator*()
         {
-            Assert(id.block_node != nullptr);
+            debug_assert(id.block_node != nullptr);
             Block &block = id.block_node->data;
             return block[id.index_inside_block];
         }
 
         Iterator &operator++()
         {
-            Assert(id.block_node != nullptr);
+            debug_assert(id.block_node != nullptr);
             Block &block = id.block_node->data;
             if (block.is_full()) {
                 id.block_node = id.block_node->next;
