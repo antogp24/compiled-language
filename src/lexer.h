@@ -11,6 +11,7 @@
 #include "core/string.h"
 
 struct Location {
+    size_t byte_offset;
     uint32_t line;
     uint32_t column;
 };
@@ -206,11 +207,11 @@ struct std::formatter<Token> {
 
 #define eprintln_path(filename, location)\
     eprintln(ESC_CODE_BLUE ESC_CODE_UNDERSCORE "{}:{}:{}" ESC_CODE_RESET,\
-        (filename), (location).line, (location).column + 1)
+        (filename), (location).line, (location).column)
 
 #define print_path(filename, location)\
     std::print(ESC_CODE_BLUE ESC_CODE_UNDERSCORE "{}:{}:{}" ESC_CODE_RESET,\
-        (filename), (location).line, (location).column + 1)
+        (filename), (location).line, (location).column)
 
 #define feature_todo(lexer, location, feature_name)\
 do {\
@@ -219,7 +220,7 @@ do {\
         (feature_name));\
     (lexer).print_error_message_line(location);\
     eprint(ESC_CODE_YELLOW "INFO" ESC_CODE_RESET ": implementation should go here: ");\
-    Location location_in_compiler = { .line = (uint32_t)__LINE__, .column = 0 };\
+    Location location_in_compiler = { .line = (uint32_t)__LINE__, .column = 1 };\
     eprintln_path(__FILE__, location_in_compiler);\
     eprintln("");\
     debug_break();\
@@ -245,9 +246,7 @@ struct Lexer {
     Token_Pool token_pool = {}; // An ordered pool of tokens.
     String_View source = {}; // A view into the buffer for the source code.
     String_View filename = {}; // Path of the source code's file.
-    Location location = { .line = 1, .column = 0 };
-    size_t cursor = 0; // Byte offset of the current character into the source code.
-    size_t current_line_start = 0; // Byte offset of the current line into the source code.
+    Location current_location = { .byte_offset = 0, .line = 1, .column = 1 };
 
     Lexer(String_View path)
         : filename(path)
@@ -257,17 +256,32 @@ struct Lexer {
         source.length = buffer_of_source_code.size();
     }
 
+    constexpr char peek() const
+    {
+        return source[current_location.byte_offset];
+    }
+
+    constexpr char peek_at(size_t byte_offset) const
+    {
+        return source[byte_offset];
+    }
+
     constexpr Option<char> peek_next() const
     {
-        if (cursor + 1 < source.length) {
-            return Some(source[cursor + 1]);
+        if (current_location.byte_offset + 1 < source.length) {
+            return Some(source[current_location.byte_offset + 1]);
         }
         return None(char);
     }
 
     constexpr bool is_eof() const
     {
-        return cursor >= source.length;
+        return current_location.byte_offset >= source.length;
+    }
+
+    constexpr bool is_eof_at(size_t byte_offset) const
+    {
+        return byte_offset >= source.length;
     }
 
     void push_token(Token_Kind kind, Location loc);
@@ -277,6 +291,7 @@ struct Lexer {
     std::string unescape(String_View text, Location loc);
     void advance(size_t count);
     void skip_whitespace();
+    String_View get_line(Location loc);
     void print_error_message_line(Location error_location);
     void print_token_stream();
     void lex();

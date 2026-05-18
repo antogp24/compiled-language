@@ -32,9 +32,7 @@ void Parser::parse()
         case Token_Kind::Let:
         case Token_Kind::Const:
         {
-            Stmt stmt = parse_variable_definition_stmt();
-            debug_assert(stmt.kind == Stmt_Kind::VariableDefinition);
-            const Variable_Definition &var = stmt.variable_definition;
+            Variable_Definition var = parse_variable_definition();
             global_variable_definitions[var.name.to_std_string()] = var;
         }break;
 

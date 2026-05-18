@@ -65,7 +65,7 @@ void pretty_print_line(String_View line, Location location)
     eprintln("{:>{}} | ", ' ', line_number_digit_count);
     eprintln("{} | {}", location.line, line);
     eprintln("{:>{}} | " ESC_CODE_YELLOW "{:>{}}" ESC_CODE_RESET,
-        ' ', line_number_digit_count, '^', location.column + 1);
+        ' ', line_number_digit_count, '^', location.column);
 };
 
 // I don't use isspace because it has undefined behaviour for certain inputs.
@@ -349,24 +349,20 @@ std::string Lexer::unescape(String_View text, Location loc)
 void Lexer::advance(size_t count)
 {
     for (size_t i = 0; !is_eof() && i < count; ++i) {
-        if (source[cursor] == '\n') {
-            String_View this_line = source.slice(current_line_start, cursor);
-            line_map.insert({ location.line, this_line });
-            location.line++;
-            location.column = 0;
-            current_line_start = cursor + 1;
+        if (peek() == '\n') {
+            current_location.line++;
+            current_location.column = 1;
         } else {
-            location.column++;
+            current_location.column++;
         }
-        cursor++;
+        current_location.byte_offset++;
     }
 }
 
 void Lexer::skip_whitespace()
 {
     while (!is_eof()) {
-        char c = source[cursor];
-        if (is_whitespace(c)) {
+        if (is_whitespace(peek())) {
             advance(1);
         } else {
             return;
@@ -374,23 +370,36 @@ void Lexer::skip_whitespace()
     }
 }
 
+String_View Lexer::get_line(Location loc)
+{
+    size_t line_start = 0;
+    if (loc.byte_offset > 0) {
+        for (size_t i = loc.byte_offset - 1; true; --i) {
+            char c = peek_at(i);
+            if (i == 0) {
+                line_start = i;
+                break;
+            } else if (c == '\n' || c == '\r') {
+                line_start = i + 1;
+                break;
+            }
+        }
+    }
+    size_t line_end = loc.byte_offset;
+    while (peek_at(line_end) != '\n' &&
+           peek_at(line_end) != '\r' &&
+           !is_eof_at(line_end))
+    {
+        ++line_end;
+    }
+    return source.slice(line_start, line_end);
+}
+
 void Lexer::print_error_message_line(Location error_location)
 {
     eprintln_path(filename, error_location);
-
-    if (line_map.contains(error_location.line)) {
-        pretty_print_line(line_map[error_location.line], error_location);
-    } else {
-        while (!is_eof() && source[cursor] != '\n') {
-            advance(1);
-        }
-        advance(1); // consume the \n, this also updates the line map.
-
-        // Now it should contain the line.
-        if (line_map.contains(error_location.line)) {
-            pretty_print_line(line_map[error_location.line], error_location);
-        }
-    }
+    String_View line = get_line(error_location);
+    pretty_print_line(line, error_location);
 }
 
 void Lexer::print_token_stream()
@@ -405,17 +414,17 @@ void Lexer::lex()
 {
 #define push_single(token)\
 do {\
-    push_token(Token_Kind::token, location);\
+    push_token(Token_Kind::token, current_location);\
     advance(1);\
 } while(0)
 
 #define push_if(extra_char, token_if_extra, token_else)\
 do{\
     if (peek_next() == Some(extra_char)) {\
-        push_token(Token_Kind::token_if_extra, location);\
+        push_token(Token_Kind::token_if_extra, current_location);\
         advance(2);\
     } else {\
-        push_token(Token_Kind::token_else, location);\
+        push_token(Token_Kind::token_else, current_location);\
         advance(1);\
     }\
 }while (0)
@@ -423,13 +432,13 @@ do{\
 #define push_if_2(extra_char_1, token_if_extra_1, extra_char_2, token_if_extra_2, token_else)\
 do{\
     if (peek_next() == Some(extra_char_1)) {\
-        push_token(Token_Kind::token_if_extra_1, location);\
+        push_token(Token_Kind::token_if_extra_1, current_location);\
         advance(2);\
     } else if (peek_next() == Some(extra_char_2)) {\
-        push_token(Token_Kind::token_if_extra_2, location);\
+        push_token(Token_Kind::token_if_extra_2, current_location);\
         advance(2);\
     } else {\
-        push_token(Token_Kind::token_else, location);\
+        push_token(Token_Kind::token_else, current_location);\
         advance(1);\
     }\
 }while (0)
@@ -440,17 +449,17 @@ do{\
     if (next == Some(repeated_char)) {\
         advance(1);\
         if (peek_next() == Some('=')) {\
-            push_token(Token_Kind::op_op_equal, location);\
+            push_token(Token_Kind::op_op_equal, current_location);\
             advance(2);\
         } else {\
-            push_token(Token_Kind::op_op, location);\
+            push_token(Token_Kind::op_op, current_location);\
             advance(1);\
         }\
     } else if (next == Some('=')) {\
-        push_token(Token_Kind::op_equal, location);\
+        push_token(Token_Kind::op_equal, current_location);\
         advance(2);\
     } else {\
-        push_token(Token_Kind::op, location);\
+        push_token(Token_Kind::op, current_location);\
         advance(1);\
     }\
 }while (0)
@@ -460,7 +469,7 @@ do{\
         if (is_eof()) {
             break;
         }
-        char c = source[cursor];
+        char c = peek();
         if (c == '_' || is_alphabetic(c)) {
             lex_identifier();
         } else if (is_decimal_digit(c)) {
@@ -496,11 +505,11 @@ do{\
             case ';': push_single(Semicolon); break;
 
             default:
-                error_at(*this, location, "Unexpected character {}", c);
+                error_at(*this, current_location, "Unexpected character {}", c);
             }
         }
     }
-    push_token(Token_Kind::EndOfFile, location);
+    push_token(Token_Kind::EndOfFile, current_location);
 
 #undef push_single
 #undef push_if
@@ -510,36 +519,35 @@ do{\
 
 void Lexer::lex_identifier()
 {
-    Location loc = location;
-    size_t start = cursor;
+    Location start_location = current_location;
 
     advance(1); // consume the first character of the identifier.
     while (!is_eof()) {
-        char c = source[cursor];
+        char c = peek();
         if (c == '_' || is_alphanumeric(c)) {
             advance(1);
         } else {
             break;
         }
     }
-    String_View identifier_name = source.slice(start, cursor);
+    String_View identifier_name = source.slice(start_location.byte_offset, current_location.byte_offset);
     Token_Kind kind = get_keyword(identifier_name);
 
     if (kind == Token_Kind::None) {
-        push_token(Token_Kind::Identifier, loc, Token_Variant{ .str = identifier_name });
+        push_token(Token_Kind::Identifier, start_location, Token_Variant{ .str = identifier_name });
     } else {
-        push_token(kind, loc); // It's a keyword.
+        push_token(kind, start_location); // It's a keyword.
     }
 }
 
 void Lexer::consume_digits(Number_Base base)
 {
     // TODO: Support scientific exponentiation.
-    while (!is_eof() && is_alphanumeric(source[cursor])) {
-        char c = source[cursor];
+    while (!is_eof() && is_alphanumeric(peek())) {
+        char c = peek();
         Number_Base c_base = get_digit_base(c);
         if (!is_base_compatible_with(base, c_base)) {
-            error_at(*this, location, "The character '{}' is not in {} base.", c, magic_enum::enum_name(base));
+            error_at(*this, current_location, "The character '{}' is not in {} base.", c, magic_enum::enum_name(base));
         }
         advance(1);
     }
@@ -547,124 +555,123 @@ void Lexer::consume_digits(Number_Base base)
 
 void Lexer::lex_number_literal()
 {
-    debug_assert(is_decimal_digit(source[cursor]));
-    Location loc = location;
-    size_t start = cursor;
+    debug_assert(is_decimal_digit(peek()));
+    Location start_location = current_location;
 
     Number_Base base = Number_Base::Decimal; // The default is decimal.
 
     // Handling support 0x, 0b and 0o prefixes for integers.
-    if (source[cursor] == '0' &&
+    if (peek() == '0' &&
         (peek_next() == Some('b') ||
          peek_next() == Some('o') ||
          peek_next() == Some('x')))
     {
         advance(1); // consume the leading 0.
-        char prefix = source[cursor];
+        char prefix = peek();
         switch (prefix) {
         case 'b': base = Number_Base::Binary; break;
         case 'o': base = Number_Base::Octal; break;
         case 'x': base = Number_Base::Hexadecimal; break;
         default:
-            error_at(*this, loc, "Unrecognized integer prefix \"0{}\"", prefix);
+            error_at(*this, start_location, "Unrecognized integer prefix \"0{}\"", prefix);
         }
         advance(1); // consume the base prefix.
     }
 
     consume_digits(base); // leading digits.
 
-    if (!is_eof() && source[cursor] == '.') {
+    if (!is_eof() && peek() == '.') {
         advance(1); // consume the dot.
         consume_digits(base); // trailing digits.
 
-        String_View float_number_text = source.slice(start, cursor);
-        double float_value = parse_f64(float_number_text, loc);
-        push_token(Token_Kind::Float_Literal, loc, Token_Variant{ .float_literal = float_value });
+        String_View float_number_text = source.slice(start_location.byte_offset, current_location.byte_offset);
+        double float_value = parse_f64(float_number_text, start_location);
+        push_token(Token_Kind::Float_Literal, start_location, Token_Variant{ .float_literal = float_value });
     } else {
-        String_View integer_number_text = source.slice(start, cursor);
-        uint64_t integer_value = parse_u64(integer_number_text, loc, (int)base);
-        push_token(Token_Kind::Int_Literal, loc, Token_Variant{ .int_literal = integer_value });
+        String_View integer_number_text = source.slice(start_location.byte_offset, current_location.byte_offset);
+        uint64_t integer_value = parse_u64(integer_number_text, start_location, (int)base);
+        push_token(Token_Kind::Int_Literal, start_location, Token_Variant{ .int_literal = integer_value });
     }
 }
 
 void Lexer::lex_char_literal()
 {
-    Location loc = location;
-    debug_assert(source[cursor] == '\'');
+    Location start_location = current_location;
+    debug_assert(peek() == '\'');
     advance(1); // consume the first '
 
-    size_t start = cursor;
-    while (!is_eof() && source[cursor] != '\'') {
-        if (source[cursor] == '\\') {
+    size_t start_inside_literal = current_location.byte_offset;
+    while (!is_eof() && peek() != '\'') {
+        if (peek() == '\\') {
             advance(1); // consume first character of escape sequence (could be the ')
         }
         advance(1);
     }
     if (is_eof()) {
-        error_at(*this, loc, "Unterminated Char literal.");
+        error_at(*this, start_location, "Unterminated Char literal.");
     }
 
-    String_View escaped_char_text = source.slice(start, cursor);
-    std::string unescaped = unescape(escaped_char_text, loc);
+    String_View escaped_char_text = source.slice(start_inside_literal, current_location.byte_offset);
+    std::string unescaped = unescape(escaped_char_text, start_location);
 
     if (unescaped.size() == 0) {
-        error_at(*this, loc, "Empty Char literal is invalid.");
+        error_at(*this, start_location, "Empty Char literal is invalid.");
     } else if (unescaped.size() > 1) {
-        error_at(*this, loc, "More than one character in Char literal.");
+        error_at(*this, start_location, "More than one character in Char literal.");
     }
     char char_literal = unescaped[0];
-    push_token(Token_Kind::Char_Literal, loc, Token_Variant{ .char_literal = char_literal });
+    push_token(Token_Kind::Char_Literal, start_location, Token_Variant{ .char_literal = char_literal });
 
-    debug_assert(source[cursor] == '\'');
+    debug_assert(peek() == '\'');
     advance(1); // consume the last '\''
 }
 
 void Lexer::lex_string_literal()
 {
-    Location loc = location;
-    debug_assert(source[cursor] == '"');
+    Location start_location = current_location;
+    debug_assert(peek() == '"');
     advance(1); // consume the first '"'
 
-    size_t start = cursor;
-    while (!is_eof() && source[cursor] != '"') {
-        if (source[cursor] == '\\') {
+    size_t start_inside_literal = current_location.byte_offset;
+    while (!is_eof() && peek() != '"') {
+        if (peek() == '\\') {
             advance(1); // consume escape sequence (could be '\''
         }
         advance(1);
     }
     if (is_eof()) {
-        error_at(*this, loc, "Unterminated String literal.");
+        error_at(*this, start_location, "Unterminated String literal.");
     }
 
-    String_View string_literal_text = source.slice(start, cursor);
-    push_token(Token_Kind::String_Literal, loc, Token_Variant{ .str = string_literal_text });
+    String_View string_literal_text = source.slice(start_inside_literal, current_location.byte_offset);
+    push_token(Token_Kind::String_Literal, start_location, Token_Variant{ .str = string_literal_text });
 
-    debug_assert(source[cursor] == '"');
+    debug_assert(peek() == '"');
     advance(1); // consume the last '"'
 }
 
 void Lexer::lex_multiline_comment()
 {
-    Location loc = location;
-    debug_assert(source[cursor] == '/' && peek_next() == Some('*'));
+    Location start_location = current_location;
+    debug_assert(peek() == '/' && peek_next() == Some('*'));
     advance(2); // consume the '/*'
 
-    while (!is_eof() && !(source[cursor] == '*' && peek_next() == Some('/'))) {
-        if (source[cursor] == '/' && peek_next() == Some('*')) {
+    while (!is_eof() && !(peek() == '*' && peek_next() == Some('/'))) {
+        if (peek() == '/' && peek_next() == Some('*')) {
             lex_multiline_comment(); // Nested multiline comments.
         } else {
             advance(1);
         }
     }
     if (is_eof()) {
-        error_at(*this, loc, "Unterminated multiline comment.");
+        error_at(*this, start_location, "Unterminated multiline comment.");
     }
     advance(2); // Consume the */
 }
 
 void Lexer::lex_slash()
 {
-    debug_assert(source[cursor] == '/');
+    debug_assert(peek() == '/');
 
     Option<char> next = peek_next();
     if (next.is_some()) {
@@ -673,10 +680,10 @@ void Lexer::lex_slash()
         case '/': {
             // Single line comment.
             advance(2); // consume both slashes.
-            while (!is_eof() && source[cursor] != '\n') {
+            while (!is_eof() && peek() != '\n') {
                 advance(1);
             }
-            if (source[cursor] == '\n') {
+            if (peek() == '\n') {
                 advance(1);
             }
         } break;
@@ -684,14 +691,14 @@ void Lexer::lex_slash()
             lex_multiline_comment();
             break;
         case '=':
-            push_token(Token_Kind::DivEqual, location);
+            push_token(Token_Kind::DivEqual, current_location);
             advance(2);
             break;
         default:
-            error_at(*this, location, "Unrecognized token \"/{}\"", c);
+            error_at(*this, current_location, "Unrecognized token \"/{}\"", c);
         }
     } else {
-        push_token(Token_Kind::Div, location);
+        push_token(Token_Kind::Div, current_location);
         advance(1);
     }
 }
