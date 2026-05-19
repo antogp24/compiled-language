@@ -47,6 +47,7 @@ public:
         return blocks.get_last();
     }
 
+    // The memory of the item is zero initialized.
     T* append()
     {
         Block &block = get_block_with_available_space();

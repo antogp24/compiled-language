@@ -8,7 +8,7 @@
 template <typename T>
 struct Option {
     T value;
-    bool has_value;
+    bool has_value = false;
 
     constexpr bool is_some() const { return has_value; }
     constexpr bool is_none() const { return !has_value; }
@@ -27,5 +27,4 @@ struct Option {
 };
 
 #define Some(x) Option{ x, true }
-#define None(T) Option<T>{}
 

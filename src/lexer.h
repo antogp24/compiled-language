@@ -241,7 +241,6 @@ do {\
 using Token_Pool = Pool<Token, 1024>;
 
 struct Lexer {
-    std::unordered_map<uint32_t, String_View> line_map = {}; // Maps line number to the string view of that line.
     std::string buffer_of_source_code = {}; // Fuck std::string::substr, it returns a std::string instead of String_View.
     Token_Pool token_pool = {}; // An ordered pool of tokens.
     String_View source = {}; // A view into the buffer for the source code.
@@ -271,7 +270,7 @@ struct Lexer {
         if (current_location.byte_offset + 1 < source.length) {
             return Some(source[current_location.byte_offset + 1]);
         }
-        return None(char);
+        return {};
     }
 
     constexpr bool is_eof() const

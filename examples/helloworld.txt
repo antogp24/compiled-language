@@ -17,7 +17,7 @@ fn test() {
     }
 
     // single line comment
-    let a = 0xff * 0b10 + 6 - 7 - 0o17;
+    let a = 0xff * 0b10 + 6 - 7 - 0o17 / 2;
     let b = '\n' + 69.420;
     print("hello world");
     print(a + b);

@@ -20,7 +20,7 @@ int main(int argc, char *argv[])
 std::string_view get_exe_name(std::string_view executable_path)
 {
     const size_t len = executable_path.size();
-    Option<size_t> last_slash_index = None(size_t);
+    Option<size_t> last_slash_index = {};
     for (size_t i = 0; i < len; ++i) {
         char c = executable_path[i];
         if (c == '/' || c == '\\') {

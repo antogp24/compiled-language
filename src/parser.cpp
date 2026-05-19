@@ -1,9 +1,41 @@
 #include "parser.h"
 
+Parse_Rule get_parse_rule(Token_Kind kind)
+{
+#define case_prefix(token_kind, fn, prec)\
+    case Token_Kind::token_kind:\
+        return Parse_Rule{ .prefix = &Parser::fn, .infix = nullptr, .precedence = Precedence::prec }
+
+#define case_infix(token_kind, fn, prec)\
+    case Token_Kind::token_kind:\
+        return Parse_Rule{ .prefix = nullptr, .infix = &Parser::fn, .precedence = Precedence::prec }
+
+#define case_both(token_kind, prefix_fn, infix_fn, prec)\
+    case Token_Kind::token_kind:\
+        return Parse_Rule{ .prefix = &Parser::prefix_fn, .infix = &Parser::infix_fn, .precedence = Precedence::prec }
+
+    switch (kind) {
+        case_prefix(Int_Literal, parse_number, None);
+        case_prefix(Float_Literal, parse_number, None);
+        case_prefix(Char_Literal, parse_number, None);
+        case_prefix(ParenLeft, parse_tuple_or_grouping, None);
+        case_both(Minus, parse_unary, parse_binary, AddSub);
+        case_both(Plus, parse_unary, parse_binary, AddSub);
+        case_both(Star, parse_unary, parse_binary, MulDivMod);
+        case_infix(Div, parse_binary, MulDivMod);
+    }
+    return Parse_Rule{ .prefix = nullptr, .infix = nullptr, .precedence = Precedence::None };
+#undef case_none
+#undef case_prefix
+#undef case_infix
+#undef case_both
+}
+
 void Parser::advance(size_t count)
 {
     for (size_t i = 0; i < count; ++i) {
         debug_assert(!is_eof());
+        p_previous_token = p_current_token;
         ++cursor; // Go to the next token (using the iterator's overloaded ++operator).
         p_current_token = p_lexer->token_pool.get_ptr(cursor.id);
     }
@@ -148,24 +180,24 @@ Variable_Definition Parser::parse_variable_definition()
 
     String_View name = consume(Token_Kind::Identifier)->data.str;
 
-    Option<Type_Annotation> type_annotation = None(Type_Annotation);
+    Option<Type_Annotation> type_annotation = {};
     if (peek().kind == Token_Kind::Colon) {
         advance();
         type_annotation = Some(parse_type_annotation());
     }
 
-    Option<Expr> initializer = None(Expr);
+    Expr *p_initializer = nullptr;
     if (peek().kind == Token_Kind::Equal) {
         advance();
-        initializer = Some(parse_expr());
+        p_initializer = parse_expr();
     }
-    if (is_const && initializer.is_none()) {
+    if (is_const && p_initializer == nullptr) {
         error_at(*p_lexer, peek().location, "An initializer is necessary for a constant, but got none.");
     }
 
     consume(Token_Kind::Semicolon);
 
-    return Variable_Definition{ type_annotation, name, initializer, is_const };
+    return Variable_Definition{ type_annotation, name, p_initializer, is_const };
 }
 
 // Statements are only allowed inside functions.
@@ -234,35 +266,29 @@ Stmt Parser::parse_for_stmt(const Token *p_label)
     debug_assert(peek().kind == Token_Kind::For);
     advance();
 
-    Option<Variable_Definition> initializer = {};
+    Option<Variable_Definition> before = {};
     if (peek().kind == Token_Kind::Let) {
-        initializer = Some(parse_variable_definition()); // already consumes the semicolon.
+        before = Some(parse_variable_definition()); // already consumes the semicolon.
     } else {
         consume(Token_Kind::Semicolon);
     }
 
-    Option<Expr> condition = {};
+    Expr *p_condition = nullptr;
     if (peek().kind != Token_Kind::Semicolon) {
-        condition = Some(parse_expr());
+        p_condition = parse_expr();
     }
     consume(Token_Kind::Semicolon);
 
-    Option<Expr> after = {};
+    Expr *p_after = nullptr;
     if (peek().kind != Token_Kind::Semicolon) {
-        condition = Some(parse_expr());
+        p_after = parse_expr();
     }
     consume(Token_Kind::Semicolon);
 
     Dynamic_Array<Stmt> body = parse_scope_block();
 
     return Stmt{
-        .loop = {
-            .p_label = p_label,
-            .initializer = initializer,
-            .condition = condition,
-            .after = after,
-            .body = body,
-        },
+        .loop = { p_label, before, p_condition, p_after, body },
         .location = loc,
         .kind = Stmt_Kind::Loop,
     };
@@ -274,13 +300,13 @@ Stmt Parser::parse_while_stmt(const Token *p_label)
     debug_assert(peek().kind == Token_Kind::While);
     advance();
 
-    Option<Expr> condition = Some(parse_expr());
+    Expr *p_condition = parse_expr();
     Dynamic_Array<Stmt> body = parse_scope_block();
 
     return Stmt{
         .loop = {
             .p_label = p_label,
-            .condition = condition,
+            .p_condition = p_condition,
             .body = body,
         },
         .location = loc,
@@ -341,9 +367,9 @@ Stmt Parser::parse_continue_stmt()
 Stmt Parser::parse_expr_stmt()
 {
     Location loc = peek().location;
-    Expr expr = parse_expr();
+    Expr *p_expr = parse_expr();
     consume(Token_Kind::Semicolon);
-    return Stmt{ .expr = expr, .location = loc, .kind = Stmt_Kind::Expr };
+    return Stmt{ .p_expr = p_expr, .location = loc, .kind = Stmt_Kind::Expr };
 }
 
 Dynamic_Array<Stmt> Parser::parse_scope_block()
@@ -504,7 +530,171 @@ Function_Signature Parser::parse_function_signature()
     };
 }
 
-Expr Parser::parse_expr()
+Expr *Parser::parse_expr()
 {
-    feature_todo(*p_lexer, peek().location, "Parsing expressions");
+    return parse_precedence(get_next_level(Precedence::None));
 }
+
+Expr *Parser::parse_precedence(Precedence precedence)
+{
+    advance();
+    Parse_Prefix_Fn prefix_rule = get_parse_rule(peek_prev().kind).prefix;
+    if (prefix_rule == nullptr) {
+        error_at(*p_lexer, peek_prev().location, "Expected an expression.");
+    }
+    Expr *p_prefix_expr = (this->*prefix_rule)();
+
+    Precedence current_precedence = get_parse_rule(peek().kind).precedence;
+    if (precedence > current_precedence) {
+        return p_prefix_expr;
+    }
+
+    Expr *p_expr = nullptr;
+    Expr *p_left = p_prefix_expr;
+
+    while (!is_eof() && precedence <= (current_precedence = get_parse_rule(peek().kind).precedence))
+    {
+        advance();
+        Parse_Infix_Fn infix_rule = get_parse_rule(peek_prev().kind).infix;
+        debug_assert(infix_rule != nullptr);
+        p_expr = (this->*infix_rule)(p_left);
+        p_left = p_expr;
+    }
+
+    return p_expr;
+}
+
+// Assumes that it is past one the number token.
+Expr *Parser::parse_number()
+{
+    Expr *p_expr = expression_pool.append();
+    p_expr->kind = Expr_Kind::Number;
+    p_expr->location = peek_prev().location;
+
+    switch (peek_prev().kind) {
+    case Token_Kind::Int_Literal:
+        p_expr->number = {
+            .uint_value = peek_prev().data.int_literal,
+            .kind = Number_Kind::Integer,
+        };
+        break;
+    case Token_Kind::Float_Literal:
+        p_expr->number = {
+            .float_value = peek_prev().data.float_literal,
+            .kind = Number_Kind::Float,
+        };
+        break;
+    case Token_Kind::Char_Literal:
+        p_expr->number = {
+            .char_value = peek_prev().data.char_literal,
+            .kind = Number_Kind::Char,
+        };
+        break;
+    default:
+        unreachable();
+    }
+
+    return p_expr;
+}
+
+Expr *Parser::parse_tuple_or_grouping()
+{
+    debug_assert(peek_prev().kind == Token_Kind::ParenLeft);
+    Expr *p_expr = expression_pool.append();
+    p_expr->location = peek_prev().location;
+
+    // Maybe this is retarded and I should make it an error.
+    if (peek().kind == Token_Kind::ParenRight) {
+        // It is an empty tuple: ()
+        advance();
+        p_expr->kind = Expr_Kind::Tuple;
+        return p_expr;
+    }
+
+    Expr *p_first_expr = parse_precedence(get_next_level(Precedence::None));
+
+    if (peek().kind == Token_Kind::Comma) {
+        // It is a tuple expression.
+        advance();
+        p_expr->kind = Expr_Kind::Tuple;
+        p_expr->tuple.expressions.append(p_first_expr);
+
+        if (peek().kind == Token_Kind::ParenRight) {
+            // It is a tuple with a single expression: (expr,)
+            advance();
+        } else {
+            // It is a tuple with many expressions: (expr0, expr1, ...)
+            consume(Token_Kind::Comma);
+            while (!is_eof() && peek().kind != Token_Kind::ParenRight) {
+                Expr *p_expr_inside_tuple = parse_precedence(get_next_level(Precedence::None));
+                if (!is_eof() && peek().kind != Token_Kind::ParenRight) {
+                    consume(Token_Kind::Comma);
+                }
+                p_expr->tuple.expressions.append(p_expr_inside_tuple);
+            }
+            consume(Token_Kind::ParenRight);
+        }
+    } else {
+        // It is just a grouping.
+        consume(Token_Kind::ParenRight);
+        p_expr->kind = Expr_Kind::Grouping;
+        p_expr->grouping.p_expr = p_first_expr;
+    }
+
+    return p_expr;
+}
+
+Expr *Parser::parse_unary()
+{
+    Token op = peek_prev();
+    Expr *p_expr = expression_pool.append();
+    p_expr->kind = Expr_Kind::Unary;
+    p_expr->location = peek_prev().location;
+
+    Expr *p_operated = parse_precedence(Precedence::Level2);
+
+    switch (op.kind) {
+    case Token_Kind::Plus:
+        p_expr->unary = { .p_expr = p_operated, .kind = Unary_Expr_Kind::Plus };
+        break;
+    case Token_Kind::Minus:
+        p_expr->unary = { .p_expr = p_operated, .kind = Unary_Expr_Kind::Minus };
+        break;
+    default:
+        unreachable();
+    }
+
+    return p_expr;
+}
+
+Expr *Parser::parse_binary(Expr *p_left)
+{
+    Token op = peek_prev();
+    Parse_Rule rule = get_parse_rule(op.kind);
+
+    Expr *p_expr = expression_pool.append();
+    p_expr->kind = Expr_Kind::Binary;
+    p_expr->location = peek_prev().location;
+
+    Expr *p_right = parse_precedence(get_next_level(rule.precedence));
+
+    switch (op.kind) {
+    case Token_Kind::Plus:
+        p_expr->binary = { p_left, p_right, Binary_Expr_Kind::Add };
+        break;
+    case Token_Kind::Minus:
+        p_expr->binary = { p_left, p_right, Binary_Expr_Kind::Sub };
+        break;
+    case Token_Kind::Star:
+        p_expr->binary = { p_left, p_right, Binary_Expr_Kind::Mul };
+        break;
+    case Token_Kind::Div:
+        p_expr->binary = { p_left, p_right, Binary_Expr_Kind::Div };
+        break;
+    default:
+        unreachable();
+    }
+
+    return p_expr;
+}
+

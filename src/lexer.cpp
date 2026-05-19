@@ -557,6 +557,7 @@ void Lexer::lex_number_literal()
 {
     debug_assert(is_decimal_digit(peek()));
     Location start_location = current_location;
+    size_t start_byte_offset = start_location.byte_offset;
 
     Number_Base base = Number_Base::Decimal; // The default is decimal.
 
@@ -576,6 +577,7 @@ void Lexer::lex_number_literal()
             error_at(*this, start_location, "Unrecognized integer prefix \"0{}\"", prefix);
         }
         advance(1); // consume the base prefix.
+        start_byte_offset += 2;
     }
 
     consume_digits(base); // leading digits.
@@ -584,11 +586,11 @@ void Lexer::lex_number_literal()
         advance(1); // consume the dot.
         consume_digits(base); // trailing digits.
 
-        String_View float_number_text = source.slice(start_location.byte_offset, current_location.byte_offset);
+        String_View float_number_text = source.slice(start_byte_offset, current_location.byte_offset);
         double float_value = parse_f64(float_number_text, start_location);
         push_token(Token_Kind::Float_Literal, start_location, Token_Variant{ .float_literal = float_value });
     } else {
-        String_View integer_number_text = source.slice(start_location.byte_offset, current_location.byte_offset);
+        String_View integer_number_text = source.slice(start_byte_offset, current_location.byte_offset);
         uint64_t integer_value = parse_u64(integer_number_text, start_location, (int)base);
         push_token(Token_Kind::Int_Literal, start_location, Token_Variant{ .int_literal = integer_value });
     }
@@ -674,29 +676,20 @@ void Lexer::lex_slash()
     debug_assert(peek() == '/');
 
     Option<char> next = peek_next();
-    if (next.is_some()) {
-        char c = next.unwrap();
-        switch (c) {
-        case '/': {
-            // Single line comment.
-            advance(2); // consume both slashes.
-            while (!is_eof() && peek() != '\n') {
-                advance(1);
-            }
-            if (peek() == '\n') {
-                advance(1);
-            }
-        } break;
-        case '*':
-            lex_multiline_comment();
-            break;
-        case '=':
-            push_token(Token_Kind::DivEqual, current_location);
-            advance(2);
-            break;
-        default:
-            error_at(*this, current_location, "Unrecognized token \"/{}\"", c);
+    if (peek_next() == Some('/')) {
+        // Single line comment.
+        advance(2); // consume both slashes.
+        while (!is_eof() && peek() != '\n') {
+            advance(1);
         }
+        if (peek() == '\n') {
+            advance(1);
+        }
+    } else if (peek_next() == Some('*')) {
+        lex_multiline_comment();
+    } else if (peek_next() == Some('=')) {
+        push_token(Token_Kind::DivEqual, current_location);
+        advance(2);
     } else {
         push_token(Token_Kind::Div, current_location);
         advance(1);
