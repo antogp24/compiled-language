@@ -36,7 +36,7 @@ std::string read_entire_file(String_View path)
     std::ifstream file(path.to_std_string(), std::ios::binary);
     if (!file) {
         std::println(
-            ESC_CODE_RED_BOLD "error" ESC_CODE_RESET
+            ESC_CODE_RED_BOLD_BG "error" ESC_CODE_RESET
             ESC_CODE_RED ": Failed to open file \"{}\"." ESC_CODE_RESET, path);
         std::exit(1);
     }
@@ -64,7 +64,7 @@ void pretty_print_line(String_View line, Location location)
     size_t line_number_digit_count = get_digit_count(location.line);
     eprintln("{:>{}} | ", ' ', line_number_digit_count);
     eprintln("{} | {}", location.line, line);
-    eprintln("{:>{}} | " ESC_CODE_YELLOW "{:>{}}" ESC_CODE_RESET,
+    eprintln("{:>{}} | " ESC_CODE_CYAN "{:>{}}" ESC_CODE_RESET,
         ' ', line_number_digit_count, '^', location.column);
 };
 
@@ -159,13 +159,16 @@ Token_Kind get_keyword(String_View text)
         {.key = "continue", .value = Token_Kind::Continue },
         {.key = "else", .value = Token_Kind::Else },
         {.key = "enum", .value = Token_Kind::Enum },
+        {.key = "false", .value = Token_Kind::False },
         {.key = "fn", .value = Token_Kind::Fn },
         {.key = "for", .value = Token_Kind::For },
         {.key = "if", .value = Token_Kind::If },
         {.key = "let", .value = Token_Kind::Let },
         {.key = "loop", .value = Token_Kind::Loop },
+        {.key = "null", .value = Token_Kind::Null },
         {.key = "return", .value = Token_Kind::Return },
         {.key = "struct", .value = Token_Kind::Struct },
+        {.key = "true", .value = Token_Kind::True },
         {.key = "union", .value = Token_Kind::Union },
         {.key = "while", .value = Token_Kind::While },
         // Built-in types.
@@ -395,17 +398,17 @@ String_View Lexer::get_line(Location loc)
     return source.slice(line_start, line_end);
 }
 
-void Lexer::print_error_message_line(Location error_location)
+void Lexer::print_error_message_line(Location loc)
 {
-    eprintln_path(filename, error_location);
-    String_View line = get_line(error_location);
-    pretty_print_line(line, error_location);
+    eprintln_path(filename, loc.line, loc.column);
+    String_View line = get_line(loc);
+    pretty_print_line(line, loc);
 }
 
 void Lexer::print_token_stream()
 {
     for (const Token &token : token_pool) {
-        print_path(filename, token.location);
+        print_path(filename, token.location.line, token.location.column);
         std::println(": {}", token);
     }
 }

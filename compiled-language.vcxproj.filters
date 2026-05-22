@@ -59,5 +59,8 @@
     <ClInclude Include="src\core\string.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\core\escape_codes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

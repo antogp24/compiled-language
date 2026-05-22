@@ -9,6 +9,7 @@
 #include "core/pool.h"
 #include "core/option.h"
 #include "core/string.h"
+#include "core/escape_codes.h"
 
 struct Location {
     size_t byte_offset;
@@ -29,13 +30,16 @@ enum class Token_Kind {
     Continue,
     Else,
     Enum,
+    False,
     Fn,
     For,
     If,
     Let,
     Loop,
+    Null,
     Return,
     Struct,
+    True,
     Union,
     While,
 
@@ -195,33 +199,14 @@ struct std::formatter<Token> {
     }
 };
 
-#define ESC_CODE_RESET      "\x1b[0m"
-#define ESC_CODE_UNDERSCORE "\x1b[4m"
-#define ESC_CODE_RED        "\x1b[31m"
-#define ESC_CODE_YELLOW     "\x1b[33m"
-#define ESC_CODE_BLUE       "\x1b[34m"
-#define ESC_CODE_RED_BOLD   "\x1b[41;1m"
-
-#define eprint(format_string, ...) std::print(stderr, format_string, ##__VA_ARGS__)
-#define eprintln(format_string, ...) std::println(stderr, format_string, ##__VA_ARGS__)
-
-#define eprintln_path(filename, location)\
-    eprintln(ESC_CODE_BLUE ESC_CODE_UNDERSCORE "{}:{}:{}" ESC_CODE_RESET,\
-        (filename), (location).line, (location).column)
-
-#define print_path(filename, location)\
-    std::print(ESC_CODE_BLUE ESC_CODE_UNDERSCORE "{}:{}:{}" ESC_CODE_RESET,\
-        (filename), (location).line, (location).column)
-
 #define feature_todo(lexer, location, feature_name)\
 do {\
-    eprintln("\n" ESC_CODE_RED_BOLD "TODO" ESC_CODE_RESET ":"\
+    eprintln("\n" ESC_CODE_RED_BOLD_BG "TODO" ESC_CODE_RESET ":"\
         ESC_CODE_RED " Feature \"{}\" is unimplemented." ESC_CODE_RESET,\
         (feature_name));\
     (lexer).print_error_message_line(location);\
     eprint(ESC_CODE_YELLOW "INFO" ESC_CODE_RESET ": implementation should go here: ");\
-    Location location_in_compiler = { .line = (uint32_t)__LINE__, .column = 1 };\
-    eprintln_path(__FILE__, location_in_compiler);\
+    eprintln_path(__FILE__, __LINE__, 1);\
     eprintln("");\
     debug_break();\
     std::exit(1);\
@@ -229,11 +214,20 @@ do {\
 
 #define error_at(lexer, location, format_string, ...)\
 do {\
-    eprint("\n" ESC_CODE_RED_BOLD "error" ESC_CODE_RESET ":" ESC_CODE_RED " ");\
+    eprint("\n" ESC_CODE_RED_BOLD_BG "error" ESC_CODE_RESET ":" ESC_CODE_RED " ");\
     eprint(format_string, ##__VA_ARGS__);\
     eprintln(ESC_CODE_RESET);\
     (lexer).print_error_message_line(location);\
     eprintln("");\
+    debug_break();\
+    std::exit(1);\
+} while(0)
+
+#define error_unlocated(format_string, ...)\
+do {\
+    eprint("\n" ESC_CODE_RED_BOLD_BG "error" ESC_CODE_RESET ":" ESC_CODE_RED " ");\
+    eprint(format_string, ##__VA_ARGS__);\
+    eprintln(ESC_CODE_RESET);\
     debug_break();\
     std::exit(1);\
 } while(0)

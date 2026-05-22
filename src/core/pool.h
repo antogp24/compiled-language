@@ -100,6 +100,20 @@ public:
         {
             return id != other.id;
         }
+
+        constexpr T *get_next() const
+        {
+            if (id.block_node == nullptr) {
+                return nullptr;
+            }
+            if (id.index_inside_block + 1 >= Block_Item_Count) {
+                if (id.block_node->next == nullptr) {
+                    return nullptr;
+                }
+                return &id.block_node->next->data.items[0];
+            }
+            return &id.block_node->data.items[id.index_inside_block + 1];
+        }
     };
 
     Iterator begin()

@@ -145,6 +145,7 @@
   <ItemGroup>
     <ClInclude Include="src\core\assertions.h" />
     <ClInclude Include="src\core\dynamic_array.h" />
+    <ClInclude Include="src\core\escape_codes.h" />
     <ClInclude Include="src\core\linked_list.h" />
     <ClInclude Include="src\core\string.h" />
     <ClInclude Include="src\lexer.h" />

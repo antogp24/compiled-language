@@ -12,22 +12,27 @@ struct Player {
 enum Test_Enum { A, B, C, D }
 
 fn test() {
-    #'some_loop: loop {
-        break some_loop;
+    #'some_label: loop {
+        loop {
+            break some_label;
+        }
     }
+
+    let xs: []i32 = {0, 1, 2, 3};
+    let ptr_to_second = cast(*i32)&xs.data[2]; 
+
+    let player = &players[0];
+    let alive_after_damage = damage(player, 5);
 
     // single line comment
     let a = 0xff * 0b10 + 6 - 7 - 0o17 / 2;
     let b = '\n' + 69.420;
     print("hello world");
     print(a + b);
-
-    let player = &players[0];
-    let alive_after_damage = damage(player, 5);
 }
 
-let players = [1]Player{
-    Player{ .hp = 65 },
+let players: [1]Player = {
+    { .hp = 65 },
 };
 
 fn damage(self: *Player, value: int) -> bool {

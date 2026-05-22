@@ -30,7 +30,7 @@ struct Dynamic_Array {
     void reserve(size_t initial_capacity)
     {
         debug_assert(count == 0 && capacity == 0);
-        debug_assert(initial_capacity > 1);
+        debug_assert(initial_capacity > 0);
 
         capacity = initial_capacity;
         items = (T*)calloc(initial_capacity, sizeof(T));

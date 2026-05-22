@@ -6,56 +6,6 @@
 #include <string>
 
 
-// Expressions
-// -------------------------------------------------------- //
-
-enum class Number_Kind { None, Integer, Float, Char };
-
-struct Expr_Number {
-    union { uint64_t uint_value; double float_value; char char_value; };
-    Number_Kind kind;
-};
-
-enum class Unary_Expr_Kind {
-    Plus,
-    Minus,
-};
-
-enum class Binary_Expr_Kind {
-    None,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    LogicalOr,
-    LogicalAnd,
-    BitwiseOr,
-    BitwiseAnd,
-    BitwiseXor,
-};
-
-enum class Expr_Kind {
-    None,
-    Number,
-    Tuple,
-    Unary,
-    Binary,
-    Grouping,
-};
-
-struct Expr {
-    union {
-        Expr_Number number;
-        struct { Dynamic_Array<Expr*> expressions; } tuple;
-        struct { Expr *p_expr; } grouping;
-        struct { Expr *p_expr; Unary_Expr_Kind kind; } unary;
-        struct { Expr *p_left, *p_right; Binary_Expr_Kind kind; } binary;
-    };
-    Location location;
-    Expr_Kind kind;
-};
-
 // Types
 // -------------------------------------------------------- //
 
@@ -87,6 +37,120 @@ struct Typed_Identifier_Group {
     Dynamic_Array<const Token*> identifiers;
 };
 
+// Expressions
+// -------------------------------------------------------- //
+
+enum class Number_Kind { None, Integer, Float, Char };
+
+struct Expr_Number {
+    union { uint64_t uint_value; double float_value; char char_value; };
+    Number_Kind kind;
+};
+
+enum class Unary_Expr_Kind {
+    None,
+    Plus,
+    Minus,
+    Dereference,
+    Addressof,
+    LogicalNot,
+    BitwiseNot,
+};
+
+enum class Binary_Expr_Kind {
+    None,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    LogicalOr,
+    LogicalAnd,
+    BitwiseOr,
+    BitwiseAnd,
+    BitwiseXor,
+    Equal,
+    NotEqual,
+    GreaterThan,
+    LessThan,
+    GreaterEqual,
+    LessEqual,
+    ShiftLeft,
+    ShiftRight,
+};
+
+enum class Assignment_Kind {
+    None,
+    Equal,
+    AddEqual,
+    SubEqual,
+    MulEqual,
+    DivEqual,
+    ModEqual,
+    ShiftLeftEqual,
+    ShiftRightEqual,
+    BitwiseAndEqual,
+    BitwiseXorEqual,
+    BitwiseOrEqual,
+};
+
+enum class Initializer_List_Kind {
+    Named, // Used for structs and unions. Field names are prefixed with a '.'
+    Unnamed, // Used for arrays.
+};
+
+struct Expr;
+
+struct Initializer_List {
+    struct Named_Field { const Token *p_name; Expr *p_expr; };
+    union {
+        struct { Dynamic_Array<Named_Field> fields; } named;
+        struct { Dynamic_Array<Expr*> expressions; } unnamed;
+    };
+    Type_Annotation type_annotation;
+    Initializer_List_Kind kind;
+};
+
+enum class Expr_Kind {
+    None,
+    Number,
+    StringLiteral,
+    Tuple,
+    Cast,
+    Unary,
+    Binary,
+    Assignment,
+    Grouping,
+    FunctionCall,
+    ArraySubscript,
+    FieldAccess,
+    Variable,
+    InitializerList,
+    True,  // Does not use any data in the expression union variants.
+    False, // Does not use any data in the expression union variants.
+    Null,  // Does not use any data in the expression union variants.
+};
+
+struct Expr {
+    union {
+        Expr_Number number;
+        String_View string_literal;
+        struct { Dynamic_Array<Expr*> expressions; } tuple;
+        struct { Type_Annotation type_annotation; Expr *p_expr; } cast;
+        struct { Expr *p_expr; Unary_Expr_Kind kind; } unary;
+        struct { Expr *p_left, *p_right; Binary_Expr_Kind kind; } binary;
+        struct { Expr *p_left, *p_right; Assignment_Kind kind; } assignment;
+        struct { Expr *p_expr; } grouping;
+        struct { Expr *p_left; Dynamic_Array<Expr *> arguments; } function_call;
+        struct { Expr *p_left; Expr *p_index; } array_subscript;
+        struct { Expr *p_left; String_View field_name; } field_access;
+        struct { Type_Annotation type_annotation; String_View name; } variable;
+        Initializer_List initializer_list;
+    };
+    Location location;
+    Expr_Kind kind;
+};
+
 // Statements
 // -------------------------------------------------------- //
 
@@ -104,6 +168,8 @@ enum class Stmt_Kind {
     None,
     Break,
     Continue,
+    Return,
+    If,
     Expr,
     Loop,
     Scope,
@@ -118,6 +184,18 @@ struct Variable_Definition {
 };
 
 struct Stmt;
+
+struct If_Branch {
+    Expr *p_condition;
+    Dynamic_Array<Stmt> statements;
+};
+
+struct Stmt_If {
+    If_Branch if_branch;
+    Dynamic_Array<If_Branch> else_if_branches;
+    Dynamic_Array<Stmt> else_statements; // Should be empty if there's no else branch.
+};
+
 struct Stmt_Loop {
     const Token* p_label; // nullptr indicates no label.
     Option<Variable_Definition> before;
@@ -130,6 +208,8 @@ struct Stmt {
     union {
         struct { const Token *p_label; /*nullptr indicates no label*/ } _break;
         struct { const Token *p_label; /*nullptr indicates no label*/ } _continue;
+        struct { Expr *p_expr; } _return;
+        Stmt_If _if;
         Expr *p_expr;
         Stmt_Loop loop;
         Dynamic_Array<Stmt> scope_block;
@@ -259,13 +339,18 @@ struct Parser {
         return *p_previous_token;
     }
 
+    constexpr Token peek_next() const
+    {
+        return *cursor.get_next();
+    }
+
     constexpr bool is_eof() const
     {
         return peek().kind == Token_Kind::EndOfFile;
     }
 
     void advance(size_t count = 1);
-    const Token *consume(Token_Kind expected);
+    const Token *consume(Token_Kind expected, const char *message);
     void parse();
     void parse_fn_def();
     void parse_struct_def();
@@ -281,6 +366,8 @@ struct Parser {
     Stmt parse_loop_stmt(const Token *p_label = nullptr);
     Stmt parse_break_stmt();
     Stmt parse_continue_stmt();
+    Stmt parse_return_stmt();
+    Stmt parse_if_stmt();
     Stmt parse_expr_stmt();
     Dynamic_Array<Stmt> parse_scope_block();
     Typed_Identifier_Group parse_typed_identifier_group();
@@ -288,8 +375,17 @@ struct Parser {
     Function_Signature parse_function_signature();
     Expr *parse_expr();
     Expr *parse_precedence(Precedence precedence);
+    Expr *parse_literal();
     Expr *parse_number();
+    Expr *parse_string_lit();
+    Expr *parse_initializer_list();
+    Expr *parse_variable();
     Expr *parse_tuple_or_grouping();
+    Expr *parse_cast();
     Expr *parse_unary();
     Expr *parse_binary(Expr *p_left);
+    Expr *parse_assignment(Expr *p_left);
+    Expr *parse_call(Expr *p_left);
+    Expr *parse_array_subscript(Expr *p_left);
+    Expr *parse_dot(Expr *p_left);
 };
