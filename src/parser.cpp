@@ -85,6 +85,8 @@ const char *cstring_from(Assignment_Kind kind)
     case Assignment_Kind::ModEqual: return "%=";
     case Assignment_Kind::ShiftLeftEqual: return "<<=";
     case Assignment_Kind::ShiftRightEqual: return ">>=";
+    case Assignment_Kind::LogicalAndEqual: return "&&=";
+    case Assignment_Kind::LogicalOrEqual: return "||=";
     case Assignment_Kind::BitwiseAndEqual: return "&=";
     case Assignment_Kind::BitwiseXorEqual: return "^=";
     case Assignment_Kind::BitwiseOrEqual: return "|=";
@@ -311,6 +313,27 @@ void println_stmt(const Stmt &stmt, size_t level)
     std::print("\n");
 }
 
+void print_function_signature(const Function_Signature &signature)
+{
+    std::print("fn {}(", signature.name);
+    for (size_t i = 0; i < signature.args.count; ++i) {
+        if (i > 0) {
+            std::print(", ");
+        }
+        const Typed_Identifier_Group &group = signature.args[i];
+        for (size_t j = 0; j < group.identifiers.count; ++j) {
+            if (j > 0) {
+                std::print(", ");
+            }
+            std::print("{}", group.identifiers[j]->data.str);
+        }
+        std::print(": ");
+        print_type_annotation(group.type_annotation);
+    }
+    std::print(") -> ");
+    print_type_annotation(signature.return_type);
+}
+
 // Does not print the semicolon at the end of it.
 void print_variable_definition(const Variable_Definition &var_def)
 {
@@ -348,6 +371,8 @@ Parse_Rule get_parse_rule(Token_Kind kind)
         case_infix(ModuloEqual, parse_assignment, Assignment);
         case_infix(ShiftLeftEqual, parse_assignment, Assignment);
         case_infix(ShiftRightEqual, parse_assignment, Assignment);
+        case_infix(AndEqual, parse_assignment, Assignment);
+        case_infix(OrEqual, parse_assignment, Assignment);
         case_infix(BitwiseAndEqual, parse_assignment, Assignment);
         case_infix(BitwiseXorEqual, parse_assignment, Assignment);
         case_infix(BitwiseOrEqual, parse_assignment, Assignment);
@@ -394,12 +419,13 @@ Parse_Rule get_parse_rule(Token_Kind kind)
 
 void Parser::print_results()
 {
-    for (const auto &[name, def] : function_definitions) {
-        std::println("fn {}:", name);
+    for (const auto &[_, def] : function_definitions) {
+        print_function_signature(def.signature);
+        std::println(" {{");
         for (size_t i = 0; i < def.statements.count; ++i) {
             println_stmt(def.statements[i], 1);
         }
-        std::print("\n"); // for some extra space between functions.
+        std::print("}}\n\n");
     }
 }
 
@@ -1284,6 +1310,8 @@ Expr *Parser::parse_assignment(Expr *p_left)
         case_assignment(ModuloEqual, ModEqual);
         case_assignment(ShiftLeftEqual, ShiftLeftEqual);
         case_assignment(ShiftRightEqual, ShiftRightEqual);
+        case_assignment(AndEqual, LogicalAndEqual);
+        case_assignment(OrEqual, LogicalOrEqual);
         case_assignment(BitwiseAndEqual, BitwiseAndEqual);
         case_assignment(BitwiseXorEqual, BitwiseXorEqual);
         case_assignment(BitwiseOrEqual, BitwiseOrEqual);

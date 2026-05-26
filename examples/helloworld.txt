@@ -1,8 +1,13 @@
-enum Test_Enum { A, B, C, D }
+enum Flags {
+	A,
+	B,
+	C,
+	D,
+}
 
 fn test() {
     #'some_label: loop {
-        loop {
+        for ;;; {
             break some_label;
         }
     }
@@ -15,8 +20,17 @@ fn test() {
     let b = '\n' + 69.420;
     let c = *ptr_to_second * 2;
     a = b = c + 1.0 / 2.0;
+
     print("hello world");
     print(a + b);
+
+    let ok = false;
+    ok ||= false;
+    ok &&= true;
+
+    let flags: Flags = 0;
+    flags |= Flags.A;
+    flags |= Flags.D;
 }
 
 struct Rect2D {
@@ -30,24 +44,26 @@ struct Player {
     texture_id: u32,
 }
 
-fn damage(self: *Player, value: int) -> bool {
+fn damage(self: *Player, value: i32) -> bool {
     self.hp -= value;
     self.hp = max(self.hp, 0);
     return self.hp > 0;
 }
 
-let players: [1]Player = {
+let players: [2]Player = {
     { .hp = 65 },
+    { .hp = 1 },
 };
 
 fn main() {
     if damage(&players[0], 5) {
-        println("Player is alive");
-        exit(0);
+        println("Player 1 is still alive");
+    } else if damage(&players[1], 5) {
+        println("Player 2 is still alive");
     } else {
-        println("Player was killed");
-        exit(1);
+        println("All players are dead.");
     }
+	exit(0);
 }
 
 /*

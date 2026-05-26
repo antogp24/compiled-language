@@ -116,6 +116,8 @@ enum class Assignment_Kind {
     ModEqual,
     ShiftLeftEqual,
     ShiftRightEqual,
+    LogicalAndEqual,
+    LogicalOrEqual,
     BitwiseAndEqual,
     BitwiseXorEqual,
     BitwiseOrEqual,
@@ -267,6 +269,8 @@ struct Function_Signature {
     String_View name;
     Location location;
 };
+
+void print_function_signature(const Function_Signature &signature);
 
 struct Function_Definition {
     Function_Signature signature;
