@@ -310,7 +310,7 @@ struct Enum_Definition {
 enum class Precedence {
     None,
     // Precedence   Associativity   Operators
-    Assignment,  // right-to-left   = += -= *= /= %= >>= <<= &= ^= |=
+    Assignment,  // right-to-left   = += -= *= /= %= >>= <<= &&= ||= &= ^= |=
     LogicalOr,   // left-to-right   ||
     LogicalAnd,  // left-to-right   &&
     BitwiseOr,   // left-to-right   |
@@ -321,10 +321,9 @@ enum class Precedence {
     Bitshift,    // left-to-right   << >>
     AddSub,      // left-to-right   + -
     MulDivMod,   // left-to-right   * / %
-    Level2,      // right-to-left   ++prefix --prefix +unary -unary ! ~ cast(type) *dereference &addressof
-    Level1,      // left-to-right   () [] . {} postfix++ postfix--
+    Level2,      // right-to-left   +unary -unary ! ~ cast(type) *dereference &addressof
+    Level1,      // left-to-right   () [] . {}
 };
-
 
 #define get_next_level(precedence) ((Precedence)((int)(precedence) + 1))
 

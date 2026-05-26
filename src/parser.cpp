@@ -363,7 +363,6 @@ Parse_Rule get_parse_rule(Token_Kind kind)
         case_both(ParenLeft, parse_tuple_or_grouping, parse_call, Level1);
         case_infix(BracketLeft, parse_array_subscript, Level1);
         case_infix(Dot, parse_dot, Level1);
-        // TODO: I am not sure if I should change the precedence from Level2 to None on these unary ops.
         case_prefix(Cast, parse_cast, Level2);
         case_prefix(Not, parse_unary, Level2);
         case_prefix(BitwiseNot, parse_unary, Level2);
@@ -986,9 +985,7 @@ Expr *Parser::parse_precedence(Precedence precedence)
 
     Expr *p_expr = nullptr;
     Expr *p_left = p_prefix_expr;
-
-    while (!is_eof() && precedence <= (current_precedence = get_parse_rule(peek().kind).precedence))
-    {
+    while (!is_eof() && precedence <= (current_precedence = get_parse_rule(peek().kind).precedence)) {
         advance();
         Parse_Infix_Fn infix_rule = get_parse_rule(peek_prev().kind).infix;
         debug_assert(infix_rule != nullptr);
@@ -1191,6 +1188,8 @@ Expr *Parser::parse_unary()
     p_expr->kind = Expr_Kind::Unary;
     p_expr->location = peek_prev().location;
 
+    // Notice how the function is called with the same level of precedence as the
+    // consumed operator, insted of the next level, to achieve right-to-left associativity.
     Expr *p_operated = parse_precedence(Precedence::Level2);
 
 #define case_unary(token_kind, unary_expr_kind)\
@@ -1265,7 +1264,11 @@ Expr *Parser::parse_assignment(Expr *p_left)
     p_expr->kind = Expr_Kind::Assignment;
     p_expr->location = op.location;
 
-    Expr *p_right = parse_precedence(get_next_level(rule.precedence));
+    // NOTE: Read https://craftinginterpreters.com/compiling-expressions.html#a-pratt-parser
+    // It explains that to handle right-to-left associativity, we have to call this function
+    // with the same precedence as the consumed operator, instead of the next level of precedence.
+    // I have no idea why it works like that, it feels like magic and it is awesome.
+    Expr *p_right = parse_precedence(Precedence::Assignment);
 
 #define case_assignment(token_kind, assignment_kind)\
     case Token_Kind::token_kind:\
