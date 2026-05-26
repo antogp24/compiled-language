@@ -21,6 +21,8 @@ fn test() {
     let xs: []i32 = {0, 1, 2, 3};
     let ptr_to_second = cast(*i32)&xs.data[2]; 
 
+    a = b = c; // TODO: Associativity is wrong here. I have to fix the parser to handle right-to-left.
+
     let player = &players[0];
     let alive_after_damage = damage(player, 5);
 

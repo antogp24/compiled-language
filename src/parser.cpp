@@ -1,5 +1,330 @@
 #include "parser.h"
 
+void print_type_annotation(const Type_Annotation &annotation)
+{
+    switch (annotation.kind) {
+    case Type_Annotation_Kind::Array:
+        std::print("[{}]", annotation.array.count);
+        print_type_annotation(*annotation.array.p_annotation);
+        break;
+    case Type_Annotation_Kind::Builtin:
+        std::print("{}", magic_enum::enum_name(annotation.builtin.keyword));
+        break;
+    case Type_Annotation_Kind::Pointer:
+        std::print("*");
+        print_type_annotation(*annotation.pointer.p_annotation);
+        break;
+    case Type_Annotation_Kind::Slice:
+        std::print("[]");
+        print_type_annotation(*annotation.slice.p_annotation);
+        break;
+    case Type_Annotation_Kind::Tuple:
+        std::print("(");
+        for (size_t i = 0; i < annotation.tuple.types.count; ++i) {
+            if (i > 0) {
+                std::print(", ");
+            }
+            print_type_annotation(annotation.tuple.types[i]);
+        }
+        std::print(")");
+        break;
+    case Type_Annotation_Kind::UserDefined:
+        std::print("{}", annotation.user_defined.name);
+        break;
+    default:
+        unreachable();
+    }
+}
+
+const char *cstring_from(Unary_Expr_Kind kind)
+{
+    switch (kind) {
+    case Unary_Expr_Kind::Plus: return "+";
+    case Unary_Expr_Kind::Minus: return "-";
+    case Unary_Expr_Kind::Dereference: return "*";
+    case Unary_Expr_Kind::Addressof: return "&";
+    case Unary_Expr_Kind::LogicalNot: return "!";
+    case Unary_Expr_Kind::BitwiseNot: return "~";
+    }
+    unreachable();
+}
+
+const char *cstring_from(Binary_Expr_Kind kind)
+{
+    switch (kind) {
+    case Binary_Expr_Kind::Add: return "+";
+    case Binary_Expr_Kind::Sub: return "-";
+    case Binary_Expr_Kind::Mul: return "*";
+    case Binary_Expr_Kind::Div: return "/";
+    case Binary_Expr_Kind::Mod: return "%";
+    case Binary_Expr_Kind::LogicalOr: return "||";
+    case Binary_Expr_Kind::LogicalAnd: return "&&";
+    case Binary_Expr_Kind::BitwiseOr: return "|";
+    case Binary_Expr_Kind::BitwiseAnd: return "&";
+    case Binary_Expr_Kind::BitwiseXor: return "^";
+    case Binary_Expr_Kind::Equal: return "==";
+    case Binary_Expr_Kind::NotEqual: return "!=";
+    case Binary_Expr_Kind::GreaterThan: return ">";
+    case Binary_Expr_Kind::LessThan: return "<";
+    case Binary_Expr_Kind::GreaterEqual: return ">=";
+    case Binary_Expr_Kind::LessEqual: return "<=";
+    case Binary_Expr_Kind::ShiftLeft: return "<<";
+    case Binary_Expr_Kind::ShiftRight: return ">>";
+    }
+    unreachable();
+}
+
+const char *cstring_from(Assignment_Kind kind)
+{
+    switch (kind) {
+    case Assignment_Kind::Equal: return "=";
+    case Assignment_Kind::AddEqual: return "+=";
+    case Assignment_Kind::SubEqual: return "-=";
+    case Assignment_Kind::MulEqual: return "*=";
+    case Assignment_Kind::DivEqual: return "/=";
+    case Assignment_Kind::ModEqual: return "%=";
+    case Assignment_Kind::ShiftLeftEqual: return "<<=";
+    case Assignment_Kind::ShiftRightEqual: return ">>=";
+    case Assignment_Kind::BitwiseAndEqual: return "&=";
+    case Assignment_Kind::BitwiseXorEqual: return "^=";
+    case Assignment_Kind::BitwiseOrEqual: return "|=";
+    }
+    unreachable();
+}
+
+void print_expr(const Expr *p_expr, size_t level)
+{
+    debug_assert(p_expr != nullptr);
+
+    static const char *parentheses_colors[6] = {
+        ESC_CODE_RED,
+        ESC_CODE_GREEN,
+        ESC_CODE_YELLOW,
+        ESC_CODE_BLUE,
+        ESC_CODE_PURPLE,
+        ESC_CODE_CYAN,
+    };
+    const char *color = parentheses_colors[level % 6];
+
+    switch (p_expr->kind) {
+    case Expr_Kind::Number:
+        std::print("{}", p_expr->number);
+        break;
+    case Expr_Kind::StringLiteral:
+        std::print("\"{}\"", p_expr->string_literal);
+        break;
+    case Expr_Kind::Tuple:
+        std::print("{}(" ESC_CODE_RESET, color);
+        for (size_t i = 0; i < p_expr->tuple.expressions.count; ++i) {
+            if (i > 0) {
+                std::print(", ");
+            }
+            print_expr(p_expr->tuple.expressions[i], level + 1);
+        }
+        std::print("{})" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::Cast:
+        std::print("cast(");
+        print_type_annotation(p_expr->cast.type_annotation);
+        std::print(")");
+        std::print("{}(" ESC_CODE_RESET, color);
+        print_expr(p_expr->cast.p_expr, level + 1);
+        std::print("{})" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::Unary:
+        std::print("{}{}(" ESC_CODE_RESET, cstring_from(p_expr->unary.kind), color);
+        print_expr(p_expr->unary.p_expr, level + 1);
+        std::print("{})" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::Binary:
+        std::print("{}(" ESC_CODE_RESET, color);
+        print_expr(p_expr->binary.p_left, level + 1);
+        std::print(" {} ", cstring_from(p_expr->binary.kind));
+        print_expr(p_expr->binary.p_right, level + 1);
+        std::print("{})" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::Assignment:
+        std::print("{}(" ESC_CODE_RESET, color);
+        print_expr(p_expr->assignment.p_left, level + 1);
+        std::print(" {} ", cstring_from(p_expr->assignment.kind));
+        print_expr(p_expr->assignment.p_right, level + 1);
+        std::print("{})" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::Grouping:
+        std::print("{}(" ESC_CODE_RESET, color);
+        print_expr(p_expr->grouping.p_expr, level + 1);
+        std::print("{})" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::FunctionCall:
+        print_expr(p_expr->function_call.p_left, level + 1);
+        std::print("{}(" ESC_CODE_RESET, color);
+        for (size_t i = 0; i < p_expr->function_call.arguments.count; ++i) {
+            if (i > 0) {
+                std::print(", ");
+            }
+            print_expr(p_expr->function_call.arguments[i], level + 1);
+        }
+        std::print("{})" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::ArraySubscript:
+        print_expr(p_expr->array_subscript.p_left, level + 1);
+        std::print("{}[" ESC_CODE_RESET, color);
+        print_expr(p_expr->array_subscript.p_index, level + 1);
+        std::print("{}]" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::FieldAccess:
+        print_expr(p_expr->field_access.p_left, level + 1);
+        std::print(".{}", p_expr->field_access.field_name);
+        break;
+    case Expr_Kind::Variable:
+        std::print("{}", p_expr->variable.name);
+        break;
+    case Expr_Kind::InitializerList:
+        std::print("{}{{" ESC_CODE_RESET, color);
+        switch (p_expr->initializer_list.kind) {
+        case Initializer_List_Kind::Named:
+            for (size_t i = 0; i < p_expr->initializer_list.named.fields.count; ++i) {
+                if (i > 0) {
+                    std::print(", ");
+                }
+                std::print("{}: ", p_expr->initializer_list.named.fields[i].p_name->data.str);
+                print_expr(p_expr->initializer_list.named.fields[i].p_expr, level + 1);
+            }
+            break;
+        case Initializer_List_Kind::Unnamed:
+            for (size_t i = 0; i < p_expr->initializer_list.unnamed.expressions.count; ++i) {
+                if (i > 0) {
+                    std::print(", ");
+                }
+                print_expr(p_expr->initializer_list.unnamed.expressions[i], level + 1);
+            }
+            break;
+        default:
+            unreachable();
+        }
+        std::print("{}}}" ESC_CODE_RESET, color);
+        break;
+    case Expr_Kind::True: std::print("true"); break;
+    case Expr_Kind::False: std::print("false"); break;
+    case Expr_Kind::Null: std::print("null"); break;
+    default:
+        unreachable();
+    }
+}
+
+void println_stmt(const Stmt &stmt, size_t level)
+{
+    size_t indent = 4 * level;
+    std::print("{:>{}}", "", indent);
+
+    switch (stmt.kind) {
+    case Stmt_Kind::Break:
+        std::print("break ");
+        if (stmt._break.p_label) {
+            std::print("{}", stmt._break.p_label->data.str);
+        }
+        std::print(";");
+        break;
+    case Stmt_Kind::Continue:
+        std::print("continue ");
+        if (stmt._continue.p_label) {
+            std::print("{}", stmt._continue.p_label->data.str);
+        }
+        std::print(";");
+        break;
+    case Stmt_Kind::Return:
+        std::print("return ");
+        print_expr(stmt._return.p_expr);
+        std::print(";");
+        break;
+    case Stmt_Kind::If:
+        std::print("if (");
+        print_expr(stmt._if.if_branch.p_condition);
+        std::println(") {{");
+        for (size_t i = 0; i < stmt._if.if_branch.statements.count; ++i) {
+            println_stmt(stmt._if.if_branch.statements[i], level + 1);
+        }
+        std::print("{:>{}}", "", indent);
+        std::print("}}");
+        for (size_t i = 0; i < stmt._if.else_if_branches.count; ++i) {
+            const If_Branch &else_if = stmt._if.else_if_branches[i];
+            std::print(" else if (");
+            print_expr(else_if.p_condition);
+            std::println(") {{");
+            for (size_t j = 0; j < else_if.statements.count; ++j) {
+                println_stmt(else_if.statements[j], level + 1);
+            }
+            std::print("{:>{}}", "", indent);
+            std::print("}}");
+        }
+        if (stmt._if.else_statements.count > 0) {
+            std::println(" else {{");
+            for (size_t i = 0; i < stmt._if.else_statements.count; ++i) {
+                println_stmt(stmt._if.else_statements[i], level + 1);
+            }
+            std::print("{:>{}}", "", indent);
+            std::print("}}");
+        }
+        break;
+    case Stmt_Kind::Expr:
+        print_expr(stmt.p_expr);
+        std::print(";");
+        break;
+    case Stmt_Kind::Loop:
+        if (stmt.loop.p_label) {
+            std::print("{}: ", stmt.loop.p_label->data.str);
+        }
+        std::print("loop (");
+        if (stmt.loop.before.is_some()) {
+            print_variable_definition(stmt.loop.before.unwrap());
+        }
+        std::print(";");
+        if (stmt.loop.p_condition) {
+            print_expr(stmt.loop.p_condition);
+        }
+        std::print(";");
+        if (stmt.loop.p_after) {
+            print_expr(stmt.loop.p_after);
+        }
+        std::println(") {{");
+        for (size_t i = 0; i < stmt.loop.body.count; ++i) {
+            println_stmt(stmt.loop.body[i], level + 1);
+        }
+        std::print("{:>{}}", "", indent);
+        std::print("}}");
+        break;
+    case Stmt_Kind::Scope:
+        std::println("{{");
+        for (size_t i = 0; i < stmt.scope_block.statements.count; ++i) {
+            println_stmt(stmt.scope_block.statements[i], level + 1);
+        }
+        std::print("{:>{}}", "", indent);
+        std::print("}}");
+        break;
+    case Stmt_Kind::VariableDefinition:
+        print_variable_definition(stmt.variable_definition);
+        std::print(";");
+        break;
+    default:
+        unreachable();
+    }
+    std::print("\n");
+}
+
+// Does not print the semicolon at the end of it.
+void print_variable_definition(const Variable_Definition &var_def)
+{
+    std::print("{} {}", var_def.is_const ? "const" : "let", var_def.name);
+    if (var_def.type_annotation.is_some()) {
+        std::print(": ");
+        print_type_annotation(var_def.type_annotation.unwrap());
+    }
+    if (var_def.p_initializer) {
+        std::print(" = ");
+        print_expr(var_def.p_initializer);
+    }
+}
+
 Parse_Rule get_parse_rule(Token_Kind kind)
 {
 #define case_prefix(token_kind, fn, prec)\
@@ -66,6 +391,17 @@ Parse_Rule get_parse_rule(Token_Kind kind)
 #undef case_prefix
 #undef case_infix
 #undef case_both
+}
+
+void Parser::print_results()
+{
+    for (const auto &[name, def] : function_definitions) {
+        std::println("fn {}:", name);
+        for (size_t i = 0; i < def.statements.count; ++i) {
+            println_stmt(def.statements[i], 1);
+        }
+        std::print("\n"); // for some extra space between functions.
+    }
 }
 
 void Parser::advance(size_t count)
@@ -295,7 +631,7 @@ Stmt Parser::parse_variable_definition_stmt()
 Stmt Parser::parse_scope_block_stmt()
 {
     Dynamic_Array<Stmt> stmts = parse_scope_block();
-    return Stmt{ .scope_block = stmts, .kind = Stmt_Kind::Scope };
+    return Stmt{ .scope_block = {.statements = stmts}, .kind = Stmt_Kind::Scope };
 }
 
 Stmt Parser::parse_labeled_loop_stmt()

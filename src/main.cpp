@@ -12,9 +12,9 @@ int main(int argc, char *argv[])
     const char* code_path = argv[1];
     Lexer lexer(String_View::from_cstr(code_path));
     lexer.lex();
-    lexer.print_token_stream();
     Parser parser(&lexer);
     parser.parse();
+    parser.print_results();
 }
 
 std::string_view get_exe_name(std::string_view executable_path)

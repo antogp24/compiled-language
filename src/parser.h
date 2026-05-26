@@ -32,6 +32,8 @@ struct Type_Annotation {
     Type_Annotation_Kind kind;
 };
 
+void print_type_annotation(const Type_Annotation &annotation);
+
 struct Typed_Identifier_Group {
     Type_Annotation type_annotation;
     Dynamic_Array<const Token*> identifiers;
@@ -47,6 +49,25 @@ struct Expr_Number {
     Number_Kind kind;
 };
 
+template <>
+struct std::formatter<Expr_Number> {
+    constexpr auto parse(std::format_parse_context &ctx) {
+        return ctx.begin();
+    }
+    auto format(const Expr_Number &number, std::format_context &ctx) const {
+        switch (number.kind) {
+        case Number_Kind::Integer:
+            return std::format_to(ctx.out(), "{}", number.uint_value);
+        case Number_Kind::Float:
+            return std::format_to(ctx.out(), "{}", number.float_value);
+        case Number_Kind::Char:
+            return std::format_to(ctx.out(), "'{}'", escape_char(number.char_value));
+        }
+        unreachable();
+    }
+};
+
+// NOTE: If you modify this, please also modify cstring_from(Unary_Expr_Kind)
 enum class Unary_Expr_Kind {
     None,
     Plus,
@@ -57,6 +78,9 @@ enum class Unary_Expr_Kind {
     BitwiseNot,
 };
 
+const char *cstring_from(Unary_Expr_Kind kind);
+
+// NOTE: If you modify this, please also modify cstring_from(Binary_Expr_Kind)
 enum class Binary_Expr_Kind {
     None,
     Add,
@@ -79,6 +103,9 @@ enum class Binary_Expr_Kind {
     ShiftRight,
 };
 
+const char *cstring_from(Binary_Expr_Kind kind);
+
+// NOTE: If you modify this, please also modify cstring_from(Assignment_Kind)
 enum class Assignment_Kind {
     None,
     Equal,
@@ -94,7 +121,10 @@ enum class Assignment_Kind {
     BitwiseOrEqual,
 };
 
+const char *cstring_from(Assignment_Kind kind);
+
 enum class Initializer_List_Kind {
+    None,
     Named, // Used for structs and unions. Field names are prefixed with a '.'
     Unnamed, // Used for arrays.
 };
@@ -111,6 +141,7 @@ struct Initializer_List {
     Initializer_List_Kind kind;
 };
 
+// NOTE: If you modify this, please also modify print_expr()
 enum class Expr_Kind {
     None,
     Number,
@@ -151,6 +182,8 @@ struct Expr {
     Expr_Kind kind;
 };
 
+void print_expr(const Expr *p_expr, size_t level = 0);
+
 // Statements
 // -------------------------------------------------------- //
 
@@ -164,6 +197,8 @@ struct Expr {
 //
 // Non constant expressions are not allowed in the variable
 // initializers on file scope though.
+//
+// NOTE: If you modify this, please also modify print_stmt()
 enum class Stmt_Kind {
     None,
     Break,
@@ -183,8 +218,9 @@ struct Variable_Definition {
     bool is_const;
 };
 
-struct Stmt;
+void print_variable_definition(const Variable_Definition &var_def);
 
+struct Stmt;
 struct If_Branch {
     Expr *p_condition;
     Dynamic_Array<Stmt> statements;
@@ -212,12 +248,15 @@ struct Stmt {
         Stmt_If _if;
         Expr *p_expr;
         Stmt_Loop loop;
-        Dynamic_Array<Stmt> scope_block;
+        struct { Dynamic_Array<Stmt> statements; } scope_block;
         Variable_Definition variable_definition;
     };
     Location location;
     Stmt_Kind kind;
 };
+
+void println_stmt(const Stmt &stmt, size_t level);
+
 
 // Functions
 // -------------------------------------------------------- //
@@ -349,6 +388,7 @@ struct Parser {
         return peek().kind == Token_Kind::EndOfFile;
     }
 
+    void print_results();
     void advance(size_t count = 1);
     const Token *consume(Token_Kind expected, const char *message);
     void parse();
