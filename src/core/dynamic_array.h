@@ -36,7 +36,7 @@ struct Dynamic_Array {
         items = (T*)calloc(initial_capacity, sizeof(T));
     }
 
-    void resizeIfNeeded(size_t added_element_count)
+    void resize_if_needed(size_t added_element_count)
     {
         if (count + added_element_count > capacity) {
             if (capacity == 0) {
@@ -55,13 +55,13 @@ struct Dynamic_Array {
 
     void append(const T &element)
     {
-        resizeIfNeeded(1);
+        resize_if_needed(1);
         items[count++] = element;
     }
 
     void append(T &&element)
     {
-        resizeIfNeeded(1);
+        resize_if_needed(1);
         items[count++] = element;
     }
 
@@ -71,5 +71,32 @@ struct Dynamic_Array {
             free(items);
             items = nullptr;
         }
+    }
+
+    struct Iterator {
+        T *ptr = nullptr;
+
+        T &operator*() const { return *ptr; }
+
+        Iterator &operator++()
+        {
+            ++ptr;
+            return *this;
+        }
+
+        bool operator!=(const Iterator &other) const
+        {
+            return this->ptr != other.ptr;
+        }
+    };
+
+    Iterator begin() const
+    {
+        return Iterator{ .ptr = &items[0] };
+    }
+
+    Iterator end() const
+    {
+        return Iterator{ .ptr = &items[count] };
     }
 };

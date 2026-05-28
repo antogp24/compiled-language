@@ -5,6 +5,7 @@
 #include <format>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 // I had to create this because std::string_view is not fucking
 // considered a trivial type, according to std::is_trivial_v.
@@ -41,6 +42,11 @@ struct String_View {
         return true;
     }
 
+    constexpr bool operator==(String_View other) const
+    {
+        return this->equals(other);
+    }
+
     std::string to_std_string() const
     {
         return std::string(data, length);
@@ -66,3 +72,10 @@ struct std::formatter<String_View> {
     }
 };
 
+template<>
+struct std::hash<String_View> {
+    size_t operator()(const String_View &str) const noexcept
+    {
+        return std::hash<std::string_view>{}(std::string_view{str.data, str.length});
+    }
+};

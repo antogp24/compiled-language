@@ -2,7 +2,7 @@
 
 #include "lexer.h"
 #include "core/dynamic_array.h"
-#include <unordered_map>
+#include <map>
 #include <string>
 
 
@@ -215,7 +215,7 @@ enum class Stmt_Kind {
 
 struct Variable_Definition {
     Option<Type_Annotation> type_annotation;
-    String_View name;
+    const Token *p_name; // nullptr is invalid, it is required.
     Expr *p_initializer; // nullptr indicates no initializer.
     bool is_const;
 };
@@ -351,11 +351,13 @@ Parse_Rule get_parse_rule(Token_Kind kind);
 // -------------------------------------------------------- //
 
 struct Parser {
-    std::unordered_map<std::string, Function_Definition> function_definitions = {};
-    std::unordered_map<std::string, Struct_Definition> struct_definitions = {};
-    std::unordered_map<std::string, Union_Definition> union_definitions = {};
-    std::unordered_map<std::string, Enum_Definition> enum_definitions = {};
-    std::unordered_map<std::string, Variable_Definition> global_variable_definitions = {};
+    // These are ordered hash maps instead of unordered to have more consistent errors.
+    std::map<std::string, Function_Definition> function_definitions = {};
+    std::map<std::string, Struct_Definition> struct_definitions = {};
+    std::map<std::string, Union_Definition> union_definitions = {};
+    std::map<std::string, Enum_Definition> enum_definitions = {};
+    std::map<std::string, Variable_Definition> global_variable_definitions = {};
+
     Pool<Type_Annotation, 256> type_annotation_pool = {};
     Pool<Expr, 1024> expression_pool = {};
     Token_Pool::Iterator cursor; // Token Pool iterator that is the current token.
@@ -395,6 +397,7 @@ struct Parser {
     void advance(size_t count = 1);
     const Token *consume(Token_Kind expected, const char *message);
     void parse();
+    void check_redefinition(Location symbol_location, String_View symbol_name);
     void parse_fn_def();
     void parse_struct_def();
     void parse_union_def();

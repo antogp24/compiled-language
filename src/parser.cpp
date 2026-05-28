@@ -337,7 +337,7 @@ void print_function_signature(const Function_Signature &signature)
 // Does not print the semicolon at the end of it.
 void print_variable_definition(const Variable_Definition &var_def)
 {
-    std::print("{} {}", var_def.is_const ? "const" : "let", var_def.name);
+    std::print("{} {}", var_def.is_const ? "const" : "let", var_def.p_name->data.str);
     if (var_def.type_annotation.is_some()) {
         std::print(": ");
         print_type_annotation(var_def.type_annotation.unwrap());
@@ -462,7 +462,8 @@ void Parser::parse()
         case Token_Kind::Const:
         {
             Variable_Definition var = parse_variable_definition();
-            global_variable_definitions[var.name.to_std_string()] = var;
+            check_redefinition(var.p_name->location, var.p_name->data.str);
+            global_variable_definitions[var.p_name->data.str.to_std_string()] = var;
         }break;
 
         default:
@@ -480,10 +481,37 @@ void Parser::parse()
     }
 }
 
+void Parser::check_redefinition(Location symbol_location, String_View symbol_name)
+{
+    std::string name = symbol_name.to_std_string();
+    bool is_struct = struct_definitions.contains(name);
+    bool is_union = union_definitions.contains(name);
+    bool is_enum = enum_definitions.contains(name);
+    bool is_fn = function_definitions.contains(name);
+    bool is_global_var = global_variable_definitions.contains(name);
+
+    if (is_struct || is_union || is_enum || is_fn || is_global_var) {
+        const char *symbol_type = "?";
+        if (is_struct) {
+            symbol_type = "struct";
+        } else if (is_union) {
+            symbol_type = "union";
+        } else if (is_enum) {
+            symbol_type = "enum";
+        } else if (is_fn) {
+            symbol_type = "function";
+        } else if (is_global_var) {
+            symbol_type = "global variable";
+        }
+        error_at(*p_lexer, symbol_location, "Symbol {} already exists and it is a {}", symbol_name, symbol_type);
+    }
+}
+
 void Parser::parse_fn_def()
 {
     Function_Signature signature = parse_function_signature();
     Dynamic_Array<Stmt> statements = parse_scope_block();
+    check_redefinition(signature.location, signature.name);
     function_definitions[signature.name.to_std_string()] = Function_Definition{
         .signature = signature,
         .statements = statements,
@@ -511,6 +539,7 @@ void Parser::parse_struct_def()
     }
     consume(Token_Kind::BraceRight, "Expected the closing '}' of the struct");
 
+    check_redefinition(loc, name);
     struct_definitions[name.to_std_string()] = Struct_Definition{
         .fields = fields,
         .name = name,
@@ -539,6 +568,7 @@ void Parser::parse_union_def()
     }
     consume(Token_Kind::BraceRight, "Expected the closing '}' of the union");
 
+    check_redefinition(loc, name);
     union_definitions[name.to_std_string()] = Union_Definition{
         .fields = fields,
         .name = name,
@@ -570,6 +600,7 @@ void Parser::parse_enum_def()
     }
     consume(Token_Kind::BraceRight, "Expected the closing '}' of the enum");
 
+    check_redefinition(loc, name);
     enum_definitions[name.to_std_string()] = Enum_Definition{
         .listings = listings,
         .name = name,
@@ -583,11 +614,11 @@ Variable_Definition Parser::parse_variable_definition()
     bool is_const = peek().kind == Token_Kind::Const;
     advance();
 
-    String_View name;
+    const Token *p_name;
     if (is_const) {
-        name = consume(Token_Kind::Identifier, "Expected the constant name")->data.str;
+        p_name = consume(Token_Kind::Identifier, "Expected the constant name");
     } else {
-        name = consume(Token_Kind::Identifier, "Expected the variable name")->data.str;
+        p_name = consume(Token_Kind::Identifier, "Expected the variable name");
     }
 
     Option<Type_Annotation> type_annotation = {};
@@ -611,7 +642,7 @@ Variable_Definition Parser::parse_variable_definition()
         consume(Token_Kind::Semicolon, "Expected a ';' to finish the variable definition");
     }
 
-    return Variable_Definition{ type_annotation, name, p_initializer, is_const };
+    return Variable_Definition{ type_annotation, p_name, p_initializer, is_const };
 }
 
 // Statements are only allowed inside functions.

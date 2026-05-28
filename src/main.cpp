@@ -1,5 +1,6 @@
 #include "lexer.h"
 #include "parser.h"
+#include "type_checker.h"
 
 std::string_view get_exe_name(std::string_view executable_path);
 
@@ -15,6 +16,8 @@ int main(int argc, char *argv[])
     Parser parser(&lexer);
     parser.parse();
     parser.print_results();
+    Type_Checker type_checker = { .p_parser = &parser };
+    type_checker.check();
 }
 
 std::string_view get_exe_name(std::string_view executable_path)

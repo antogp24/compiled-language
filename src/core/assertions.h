@@ -30,3 +30,12 @@ do {\
     std::exit(1);\
 } while(0)
 
+
+#define panic(format_string, ...)\
+    do {\
+        eprintln("\n" ESC_CODE_RED "Panic" ESC_CODE_RESET);\
+        eprint_path(__FILE__, __LINE__, 1);\
+        eprintln(": " format_string, ##__VA_ARGS__);\
+        debug_break();\
+        std::exit(1);\
+    } while(0)
