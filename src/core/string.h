@@ -29,6 +29,19 @@ struct String_View {
         return data[index];
     }
 
+    constexpr int compare(String_View other) const
+    {
+        size_t i = 0;
+        for (; i < this->length && i < other.length; ++i) {
+            if (this->data[i] != other.data[i]) {
+                break;
+            }
+        }
+        int a = (this->data && i < this->length) ? this->data[i] : 0;
+        int b = (other.data && i < other.length) ? other.data[i] : 0;
+        return a - b;
+    }
+
     constexpr bool equals(String_View other) const
     {
         if (length != other.length) {
@@ -47,6 +60,16 @@ struct String_View {
         return this->equals(other);
     }
 
+    constexpr bool operator<(String_View other) const
+    {
+        return this->compare(other) < 0;
+    }
+
+    constexpr bool operator>(String_View other) const
+    {
+        return this->compare(other) > 0;
+    }
+
     std::string to_std_string() const
     {
         return std::string(data, length);
@@ -58,6 +81,9 @@ struct String_View {
     }
 };
 static_assert(std::is_aggregate_v<String_View>);
+
+#define String_View_literal(string_literal)\
+    String_View{ .data = (string_literal), .length = sizeof(string_literal) - 1 }
 
 template <>
 struct std::formatter<String_View> {
@@ -74,7 +100,7 @@ struct std::formatter<String_View> {
 
 template<>
 struct std::hash<String_View> {
-    size_t operator()(const String_View &str) const noexcept
+    size_t operator()(const String_View &str) const
     {
         return std::hash<std::string_view>{}(std::string_view{str.data, str.length});
     }

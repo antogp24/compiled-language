@@ -158,6 +158,9 @@
     <ClInclude Include="vendor\debug_break\include\debug_break.h" />
     <ClInclude Include="vendor\magic_enum\include\magic_enum\magic_enum.hpp" />
   </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="NatvisFile.natvis" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

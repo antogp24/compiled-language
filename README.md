@@ -12,7 +12,7 @@ This is an academic project, and for **learning purposes**.
 ## Limitations that it will have
 - Only works on **Windows** OS.
 - It converts the AST into MASM, and then assembles it using the MSVC assembler from the commmand line.
-- For simplicity it uses mostly the stack, not registers.
+- For simplicity it works with the stack (no register allocation strategy).
 - It increases the stack size passing a flag to the assembler.
 - It does not optimize the code at all.
 - No module system. Programs can only be a single file.
@@ -40,37 +40,13 @@ This is an academic project, and for **learning purposes**.
 	- vec2, vec3, vec4 (all floating-point).
 	- Only mat4 (floating-point).
 
-## Possible Syntax
-```rust
-struct Rect2D {
-	top_left: vec2,
-	size: vec2,
-}
+## Usage
+The compiler does not check the extension of the source code file (as the language doesn't have a name).
+Text files are ideal:
 
-struct Player {
-	collider: Rect2D,
-	hp: int,
-	texture_id: int,
-}
-
-fn damage(self: *Player, value: int) -> bool {
-	self.hp -= value;
-	self.hp = max(self.hp, 0);
-	return self.hp > 0;
-}
-
-fn main() {
-	let player = Player{
-		.hp = random_int(1, 20),
-	};
-	let alive_after_damage = damage(&player, 5);
-
-	if alive_after_damage {
-		println("Player is alive");
-		exit(0);
-	} else {
-		println("Player was killed");
-		exit(1);
-	}
-}
+```powershell
+path\to\compiled-language.exe path\to\source_code.txt
 ```
+
+## Examples
+Check the [examples](examples) folder, where there are sample programs available to compile.

@@ -182,12 +182,12 @@ Token_Kind get_keyword(String_View text)
         {.key = "i16", .value = Token_Kind::I16 },
         {.key = "i32", .value = Token_Kind::I32 },
         {.key = "i64", .value = Token_Kind::I64 },
-        {.key = "isize", .value = Token_Kind::Isize },
+        {.key = "int", .value = Token_Kind::Int },
         {.key = "u8", .value = Token_Kind::U8 },
         {.key = "u16", .value = Token_Kind::U16 },
         {.key = "u32", .value = Token_Kind::U32 },
         {.key = "u64", .value = Token_Kind::U64 },
-        {.key = "usize", .value = Token_Kind::Usize },
+        {.key = "uint", .value = Token_Kind::Uint },
         {.key = "vec2", .value = Token_Kind::Vec2 },
         {.key = "vec3", .value = Token_Kind::Vec3 },
         {.key = "vec4", .value = Token_Kind::Vec4 },
@@ -216,12 +216,66 @@ bool is_builtin(Token_Kind kind)
     case I16:
     case I32:
     case I64:
-    case Isize:
+    case Int:
     case U8:
     case U16:
     case U32:
     case U64:
-    case Usize:
+    case Uint:
+    case Vec2:
+    case Vec3:
+    case Vec4:
+    case Mat4:
+        return true;
+    }
+    return false;
+}
+
+bool is_boolean_value(Token_Kind kind)
+{
+    return kind == Token_Kind::True || kind == Token_Kind::False;
+}
+
+bool is_integer_type(Token_Kind kind)
+{
+    using enum Token_Kind;
+    switch (kind) {
+    case I8:
+    case I16:
+    case I32:
+    case I64:
+    case Int:
+    case U8:
+    case U16:
+    case U32:
+    case U64:
+    case Uint:
+        return true;
+    }
+    return false;
+}
+
+bool is_float_type(Token_Kind kind)
+{
+    return (kind == Token_Kind::F32) || (kind == Token_Kind::F64);
+}
+
+bool is_math_type(Token_Kind kind)
+{
+    using enum Token_Kind;
+    switch (kind) {
+    case F32:
+    case F64:
+    case I8:
+    case I16:
+    case I32:
+    case I64:
+    case Int:
+    case U8:
+    case U16:
+    case U32:
+    case U64:
+    case Uint:
     case Vec2:
     case Vec3:
     case Vec4:

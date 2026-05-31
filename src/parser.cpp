@@ -31,9 +31,24 @@ void print_type_annotation(const Type_Annotation &annotation)
     case Type_Annotation_Kind::UserDefined:
         std::print("{}", annotation.user_defined.name);
         break;
+    case Type_Annotation_Kind::Function:
+        std::print("fn {}", annotation.user_defined.name);
+        break;
     default:
         unreachable();
     }
+}
+
+void print_typed_identifier_group(const Typed_Identifier_Group &group)
+{
+    for (size_t i = 0; i < group.identifiers.count; ++i) {
+        if (i > 0) {
+            std::print(", ");
+        }
+        std::print("{}", group.identifiers[i]->data.str);
+    }
+    std::print(": ");
+    print_type_annotation(group.type_annotation);
 }
 
 const char *cstring_from(Unary_Expr_Kind kind)
@@ -127,7 +142,7 @@ void print_expr(const Expr *p_expr, size_t level)
         break;
     case Expr_Kind::Cast:
         std::print("cast(");
-        print_type_annotation(p_expr->cast.type_annotation);
+        print_type_annotation(*p_expr->p_type_annotation);
         std::print(")");
         std::print("{}(" ESC_CODE_RESET, color);
         print_expr(p_expr->cast.p_expr, level + 1);
@@ -320,18 +335,34 @@ void print_function_signature(const Function_Signature &signature)
         if (i > 0) {
             std::print(", ");
         }
-        const Typed_Identifier_Group &group = signature.args[i];
-        for (size_t j = 0; j < group.identifiers.count; ++j) {
-            if (j > 0) {
-                std::print(", ");
-            }
-            std::print("{}", group.identifiers[j]->data.str);
-        }
-        std::print(": ");
-        print_type_annotation(group.type_annotation);
+        print_typed_identifier_group(signature.args[i]);
     }
     std::print(") -> ");
     print_type_annotation(signature.return_type);
+}
+
+bool Struct_Definition::contains(String_View field_name) const
+{
+    for (const Typed_Identifier_Group &group : this->fields) {
+        for (const Token *p_field : group.identifiers) {
+            if (p_field->data.str.equals(field_name)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool Union_Definition::contains(String_View field_name) const
+{
+    for (const Typed_Identifier_Group &group : this->fields) {
+        for (const Token *p_field : group.identifiers) {
+            if (p_field->data.str.equals(field_name)) {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 // Does not print the semicolon at the end of it.
@@ -419,6 +450,35 @@ Parse_Rule get_parse_rule(Token_Kind kind)
 
 void Parser::print_results()
 {
+    for (const auto &[_, def] : struct_definitions) {
+        std::print("struct {} {{\n", def.name);
+        for (const Typed_Identifier_Group &group : def.fields) {
+            std::print("    ");
+            print_typed_identifier_group(group);
+            std::print(",\n");
+        }
+        std::print("}}\n\n");
+    }
+    for (const auto &[_, def] : union_definitions) {
+        std::print("union {} {{\n", def.name);
+        for (const Typed_Identifier_Group &group : def.fields) {
+            std::print("    ");
+            print_typed_identifier_group(group);
+            std::print(",\n");
+        }
+        std::print("}}\n\n");
+    }
+    for (const auto &[_, def] : enum_definitions) {
+        std::print("enum {} {{\n", def.name);
+        for (const Enum_Listing &listing : def.listings) {
+            std::print("    {} = {},\n", listing.name, listing.value);
+        }
+        std::print("}}\n\n");
+    }
+    for (const auto &[_, def] : global_variable_definitions) {
+        print_variable_definition(def);
+        std::print(";\n\n");
+    }
     for (const auto &[_, def] : function_definitions) {
         print_function_signature(def.signature);
         std::println(" {{");
@@ -462,8 +522,11 @@ void Parser::parse()
         case Token_Kind::Const:
         {
             Variable_Definition var = parse_variable_definition();
+            if (!var.p_initializer) {
+                error_at(*p_lexer, var.p_name->location, "Global variables must have an initializer.");
+            }
             check_redefinition(var.p_name->location, var.p_name->data.str);
-            global_variable_definitions[var.p_name->data.str.to_std_string()] = var;
+            global_variable_definitions[var.p_name->data.str] = var;
         }break;
 
         default:
@@ -471,7 +534,8 @@ void Parser::parse()
                 "Expected a global variable, function, struct, union, or enum definition.");
         }
     }
-    if (!function_definitions.contains("main")) {
+    constexpr String_View entry_point = String_View_literal("main");
+    if (!function_definitions.contains(entry_point)) {
         error_unlocated(
             "Expected a main function as an entry point, but none was found.\n\n" ESC_CODE_RESET
             "The entry point has the following signature:\n\n"
@@ -483,12 +547,11 @@ void Parser::parse()
 
 void Parser::check_redefinition(Location symbol_location, String_View symbol_name)
 {
-    std::string name = symbol_name.to_std_string();
-    bool is_struct = struct_definitions.contains(name);
-    bool is_union = union_definitions.contains(name);
-    bool is_enum = enum_definitions.contains(name);
-    bool is_fn = function_definitions.contains(name);
-    bool is_global_var = global_variable_definitions.contains(name);
+    bool is_struct = struct_definitions.contains(symbol_name);
+    bool is_union = union_definitions.contains(symbol_name);
+    bool is_enum = enum_definitions.contains(symbol_name);
+    bool is_fn = function_definitions.contains(symbol_name);
+    bool is_global_var = global_variable_definitions.contains(symbol_name);
 
     if (is_struct || is_union || is_enum || is_fn || is_global_var) {
         const char *symbol_type = "?";
@@ -512,7 +575,7 @@ void Parser::parse_fn_def()
     Function_Signature signature = parse_function_signature();
     Dynamic_Array<Stmt> statements = parse_scope_block();
     check_redefinition(signature.location, signature.name);
-    function_definitions[signature.name.to_std_string()] = Function_Definition{
+    function_definitions[signature.name] = Function_Definition{
         .signature = signature,
         .statements = statements,
     };
@@ -540,7 +603,7 @@ void Parser::parse_struct_def()
     consume(Token_Kind::BraceRight, "Expected the closing '}' of the struct");
 
     check_redefinition(loc, name);
-    struct_definitions[name.to_std_string()] = Struct_Definition{
+    struct_definitions[name] = Struct_Definition{
         .fields = fields,
         .name = name,
         .location = loc,
@@ -569,7 +632,7 @@ void Parser::parse_union_def()
     consume(Token_Kind::BraceRight, "Expected the closing '}' of the union");
 
     check_redefinition(loc, name);
-    union_definitions[name.to_std_string()] = Union_Definition{
+    union_definitions[name] = Union_Definition{
         .fields = fields,
         .name = name,
         .location = loc,
@@ -601,7 +664,7 @@ void Parser::parse_enum_def()
     consume(Token_Kind::BraceRight, "Expected the closing '}' of the enum");
 
     check_redefinition(loc, name);
-    enum_definitions[name.to_std_string()] = Enum_Definition{
+    enum_definitions[name] = Enum_Definition{
         .listings = listings,
         .name = name,
         .location = loc,
@@ -611,6 +674,7 @@ void Parser::parse_enum_def()
 Variable_Definition Parser::parse_variable_definition()
 {
     debug_assert(peek().kind == Token_Kind::Let || peek().kind == Token_Kind::Const);
+    Location loc = peek().location;
     bool is_const = peek().kind == Token_Kind::Const;
     advance();
 
@@ -625,6 +689,10 @@ Variable_Definition Parser::parse_variable_definition()
     if (peek().kind == Token_Kind::Colon) {
         advance();
         type_annotation = Some(parse_type_annotation());
+        if (type_annotation.unwrap().is_void()) {
+            error_at(*p_lexer, type_annotation.unwrap().location,
+                "void is only valid for return types and for opaque pointers (*void).");
+        }
     }
 
     Expr *p_initializer = nullptr;
@@ -633,13 +701,18 @@ Variable_Definition Parser::parse_variable_definition()
         p_initializer = parse_expr();
     }
     if (is_const && p_initializer == nullptr) {
-        error_at(*p_lexer, peek().location, "An initializer is necessary for a constant, but got none.");
+        error_at(*p_lexer, loc, "An initializer is necessary for a constant, but got none.");
     }
 
     if (is_const) {
         consume(Token_Kind::Semicolon, "Expected a ';' to finish the constant definition");
     } else {
         consume(Token_Kind::Semicolon, "Expected a ';' to finish the variable definition");
+    }
+
+    if (!p_initializer && type_annotation.is_none()) {
+        error_at(*p_lexer, loc,
+            "A variable definition with no initializer and no type annotation is invalid.");
     }
 
     return Variable_Definition{ type_annotation, p_name, p_initializer, is_const };
@@ -887,6 +960,10 @@ Typed_Identifier_Group Parser::parse_typed_identifier_group()
     consume(Token_Kind::Colon, "Expected a colon to specify the type of the identifier(s)");
     Type_Annotation type_annotation = parse_type_annotation();
 
+    if (type_annotation.is_void()) {
+        error_at(*p_lexer, type_annotation.location,
+            "void is only valid for return types and for opaque pointers (*void).");
+    }
     return Typed_Identifier_Group{
         .type_annotation = type_annotation,
         .identifiers = identifiers,
@@ -915,6 +992,10 @@ Type_Annotation Parser::parse_type_annotation()
                 consume(Token_Kind::Comma,
                     "Expected a ',' to continue (or a closing ')' to end) the tuple type annotation");
             }
+            if (type_annotation.is_void()) {
+                error_at(*p_lexer, type_annotation.location,
+                    "void is only valid for return types and for opaque pointers (*void).");
+            }
             types.append(type_annotation);
         }
         consume(Token_Kind::ParenRight, "Expected a closing ')' to end the tuple type annotation");
@@ -933,6 +1014,10 @@ Type_Annotation Parser::parse_type_annotation()
             consume(Token_Kind::BracketRight, "Expected a closing ']' to end the array type annotation");
             Type_Annotation *p_type_annotation = type_annotation_pool.append();
             *p_type_annotation = parse_type_annotation();
+            if (p_type_annotation->is_void()) {
+                error_at(*p_lexer, p_type_annotation->location,
+                    "void is only valid for return types and for opaque pointers (*void).");
+            }
             return Type_Annotation{
                 .array = { .p_annotation = p_type_annotation, .count = array_count },
                 .location = loc,
@@ -943,6 +1028,10 @@ Type_Annotation Parser::parse_type_annotation()
             advance();
             Type_Annotation *p_type_annotation = type_annotation_pool.append();
             *p_type_annotation = parse_type_annotation();
+            if (p_type_annotation->is_void()) {
+                error_at(*p_lexer, p_type_annotation->location,
+                    "void is only valid for return types and for opaque pointers (*void).");
+            }
             return Type_Annotation{
                 .slice = { .p_annotation = p_type_annotation},
                 .location = loc,
@@ -1118,9 +1207,6 @@ Expr *Parser::parse_initializer_list()
     Expr *p_expr = expression_pool.append();
     p_expr->location = peek_prev().location;
     p_expr->kind = Expr_Kind::InitializerList;
-    p_expr->initializer_list.type_annotation = {
-        .kind = Type_Annotation_Kind::None, // The type of the initializer list is unresolved during parsing.
-    };
 
     if (peek().kind == Token_Kind::Dot) {
         // The initializer list is for a struct, it has named fields.
@@ -1164,10 +1250,7 @@ Expr *Parser::parse_variable()
     Expr *p_expr = expression_pool.append();
     p_expr->location = peek_prev().location;
     p_expr->kind = Expr_Kind::Variable;
-    p_expr->variable = {
-        .type_annotation = { .kind = Type_Annotation_Kind::None }, // At the moment of parsing, variables have unresolved types.
-        .name = peek_prev().data.str,
-    };
+    p_expr->variable = { .name = peek_prev().data.str };
 
     return p_expr;
 }
@@ -1228,9 +1311,15 @@ Expr *Parser::parse_cast()
     Expr *p_expr = expression_pool.append();
     p_expr->kind = Expr_Kind::Cast;
     p_expr->location = peek_prev().location;
+    // Casting is the only kind of expression that has the type resolved at parsing time.
+    p_expr->p_type_annotation = type_annotation_pool.append();
 
     consume(Token_Kind::ParenLeft, "Expected the opening '(' of the cast, after which the type is specified");
-    p_expr->cast.type_annotation = parse_type_annotation();
+    *p_expr->p_type_annotation = parse_type_annotation();
+    if (p_expr->p_type_annotation->is_void()) {
+        error_at(*p_lexer, p_expr->p_type_annotation->location,
+            "void is only valid for return types and for opaque pointers (*void).");
+    }
     consume(Token_Kind::ParenRight, "Expected the closing ')' of the cast, after which the casted expression is provided");
 
     p_expr->cast.p_expr = parse_precedence(Precedence::Level2);

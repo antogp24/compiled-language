@@ -7,4 +7,5 @@ struct Type_Checker {
 
     void check();
     void check_user_defined_type_completeness();
+    void resolve_global_variable_types();
 };

@@ -44,7 +44,8 @@ enum class Token_Kind {
     While,
 
     // Built-in Types (are also keywords)
-    // NOTE: If you modify this, please modify get_keyword() and is_builtin() too.
+    // NOTE: If you modify this, please modify: get_keyword(), is_builtin(),
+    //       is_boolean_value(), is_integer_type(), is_float_type(), is_math_type()
     Void,
     Bool,
     Char,
@@ -55,12 +56,12 @@ enum class Token_Kind {
     I16,
     I32,
     I64,
-    Isize,
+    Int,
     U8,
     U16,
     U32,
     U64,
-    Usize,
+    Uint,
     Vec2,
     Vec3,
     Vec4,
@@ -148,6 +149,10 @@ Number_Base get_digit_base(char c);
 bool is_alphanumeric(char c);
 Token_Kind get_keyword(String_View text);
 bool is_builtin(Token_Kind kind);
+bool is_boolean_value(Token_Kind kind);
+bool is_integer_type(Token_Kind kind);
+bool is_float_type(Token_Kind kind);
+bool is_math_type(Token_Kind kind);
 
 // NOTE: Since the string literal depends on the lifetime of the input file source code,
 // the heap allocated data for that buffer must live for the entire lifetime of the compiler.
@@ -208,28 +213,28 @@ do {\
     eprint(ESC_CODE_YELLOW "INFO" ESC_CODE_RESET ": implementation should go here: ");\
     eprintln_path(__FILE__, __LINE__, 1);\
     eprintln("");\
-    debug_break();\
-    std::exit(1);\
+    my_exit(1);\
 } while(0)
+
+#define error_print_prefix()\
+    eprint("\n" ESC_CODE_RED_BOLD_BG "error" ESC_CODE_RESET ":" ESC_CODE_RED " ")
 
 #define error_at(lexer, location, format_string, ...)\
 do {\
-    eprint("\n" ESC_CODE_RED_BOLD_BG "error" ESC_CODE_RESET ":" ESC_CODE_RED " ");\
+    error_print_prefix();\
     eprint(format_string, ##__VA_ARGS__);\
     eprintln(ESC_CODE_RESET);\
     (lexer).print_error_message_line(location);\
     eprintln("");\
-    debug_break();\
-    std::exit(1);\
+    my_exit(1);\
 } while(0)
 
 #define error_unlocated(format_string, ...)\
 do {\
-    eprint("\n" ESC_CODE_RED_BOLD_BG "error" ESC_CODE_RESET ":" ESC_CODE_RED " ");\
+    error_print_prefix();\
     eprint(format_string, ##__VA_ARGS__);\
     eprintln(ESC_CODE_RESET);\
-    debug_break();\
-    std::exit(1);\
+    my_exit(1);\
 } while(0)
 
 using Token_Pool = Pool<Token, 1024>;

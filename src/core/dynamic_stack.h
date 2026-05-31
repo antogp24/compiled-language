@@ -54,4 +54,7 @@ struct Stack {
         --count;
         return removed;
     }
+
+    // Use this type to have instead to have RAII.
+    struct Scoped : Stack { ~Scoped() { this->destroy(); } };
 };

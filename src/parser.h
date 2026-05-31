@@ -3,8 +3,6 @@
 #include "lexer.h"
 #include "core/dynamic_array.h"
 #include <map>
-#include <string>
-
 
 // Types
 // -------------------------------------------------------- //
@@ -16,20 +14,52 @@ enum class Type_Annotation_Kind {
     Pointer,
     Slice,
     Tuple,
-    UserDefined, // Structs, unions, enums defined by the program.
+    UserDefined, // Structs, unions, enums, defined by the program.
+    Function, // Function names, both built-in and defined by the program.
 };
 
 struct Type_Annotation {
     union {
-        struct { const Type_Annotation *p_annotation; size_t count; } array; // examples: [2]f32, [4]string
+        struct { Type_Annotation *p_annotation; size_t count; } array; // examples: [2]f32, [4]string
         struct { Token_Kind keyword; } builtin; // examples: i32, mat4, string
-        struct { const Type_Annotation *p_annotation; } pointer; // examples: *u8, *void, *Entity
-        struct { const Type_Annotation *p_annotation; } slice; // examples: []string, []u8, []i32
+        struct { Type_Annotation *p_annotation; } pointer; // examples: *u8, *void, *Entity
+        struct { Type_Annotation *p_annotation; } slice; // examples: []string, []u8, []i32
         struct { Dynamic_Array<Type_Annotation> types; } tuple; // examples: (i32, string), (*void, []u8, bool)
         struct { String_View name; } user_defined; // examples: Entity, Player
+        struct { String_View name; } function; // examples: fn do_stuff() -> void, fn add(a: int, b: int) -> int
     };
     Location location;
     Type_Annotation_Kind kind;
+
+    constexpr bool is_void() const
+    {
+        return (kind == Type_Annotation_Kind::Builtin) &&
+            (builtin.keyword == Token_Kind::Void);
+    }
+
+    constexpr bool is_boolean() const
+    {
+        return (kind == Type_Annotation_Kind::Builtin) &&
+            is_boolean_value(builtin.keyword);
+    }
+
+    constexpr bool is_integer() const
+    {
+        return (kind == Type_Annotation_Kind::Builtin) &&
+            is_integer_type(builtin.keyword);
+    }
+
+    constexpr bool is_number() const
+    {
+        return (kind == Type_Annotation_Kind::Builtin) &&
+            (is_integer_type(builtin.keyword) || is_float_type(builtin.keyword));
+    }
+
+    constexpr bool allows_math_operators() const
+    {
+        return (kind == Type_Annotation_Kind::Builtin) &&
+            is_math_type(builtin.keyword);
+    }
 };
 
 void print_type_annotation(const Type_Annotation &annotation);
@@ -38,6 +68,8 @@ struct Typed_Identifier_Group {
     Type_Annotation type_annotation;
     Dynamic_Array<const Token*> identifiers;
 };
+
+void print_typed_identifier_group(const Typed_Identifier_Group &group);
 
 // Expressions
 // -------------------------------------------------------- //
@@ -135,15 +167,15 @@ struct Expr;
 
 struct Initializer_List {
     struct Named_Field { const Token *p_name; Expr *p_expr; };
+
     union {
         struct { Dynamic_Array<Named_Field> fields; } named;
         struct { Dynamic_Array<Expr*> expressions; } unnamed;
     };
-    Type_Annotation type_annotation;
     Initializer_List_Kind kind;
 };
 
-// NOTE: If you modify this, please also modify print_expr()
+// NOTE: If you modify this, please also modify print_expr(), Expr::push_all_children
 enum class Expr_Kind {
     None,
     Number,
@@ -169,7 +201,7 @@ struct Expr {
         Expr_Number number;
         String_View string_literal;
         struct { Dynamic_Array<Expr*> expressions; } tuple;
-        struct { Type_Annotation type_annotation; Expr *p_expr; } cast;
+        struct { Expr *p_expr; } cast;
         struct { Expr *p_expr; Unary_Expr_Kind kind; } unary;
         struct { Expr *p_left, *p_right; Binary_Expr_Kind kind; } binary;
         struct { Expr *p_left, *p_right; Assignment_Kind kind; } assignment;
@@ -177,11 +209,23 @@ struct Expr {
         struct { Expr *p_left; Dynamic_Array<Expr *> arguments; } function_call;
         struct { Expr *p_left; Expr *p_index; } array_subscript;
         struct { Expr *p_left; String_View field_name; } field_access;
-        struct { Type_Annotation type_annotation; String_View name; } variable;
+        struct { String_View name; } variable;
         Initializer_List initializer_list;
     };
     Location location;
+    Type_Annotation *p_type_annotation;
     Expr_Kind kind;
+
+    constexpr bool is_lvalue() const
+    {
+        switch (kind) {
+        case Expr_Kind::ArraySubscript:
+        case Expr_Kind::FieldAccess:
+        case Expr_Kind::Variable:
+            return true;
+        }
+        return false;
+    }
 };
 
 void print_expr(const Expr *p_expr, size_t level = 0);
@@ -285,6 +329,8 @@ struct Struct_Definition {
     Dynamic_Array<Typed_Identifier_Group> fields;
     String_View name;
     Location location;
+
+    bool contains(String_View field_name) const;
 };
 
 // All unions must have a name. No anonymous unions.
@@ -292,6 +338,8 @@ struct Union_Definition {
     Dynamic_Array<Typed_Identifier_Group> fields;
     String_View name;
     Location location;
+
+    bool contains(String_View field_name) const;
 };
 
 struct Enum_Listing {
@@ -352,11 +400,13 @@ Parse_Rule get_parse_rule(Token_Kind kind);
 
 struct Parser {
     // These are ordered hash maps instead of unordered to have more consistent errors.
-    std::map<std::string, Function_Definition> function_definitions = {};
-    std::map<std::string, Struct_Definition> struct_definitions = {};
-    std::map<std::string, Union_Definition> union_definitions = {};
-    std::map<std::string, Enum_Definition> enum_definitions = {};
-    std::map<std::string, Variable_Definition> global_variable_definitions = {};
+    // Order is also very important in global variable definitions.
+    // The keys are string views into the source code of the program.
+    std::map<String_View, Function_Definition> function_definitions = {};
+    std::map<String_View, Struct_Definition> struct_definitions = {};
+    std::map<String_View, Union_Definition> union_definitions = {};
+    std::map<String_View, Enum_Definition> enum_definitions = {};
+    std::map<String_View, Variable_Definition> global_variable_definitions = {};
 
     Pool<Type_Annotation, 256> type_annotation_pool = {};
     Pool<Expr, 1024> expression_pool = {};

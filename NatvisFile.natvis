@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?> 
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <Type Name="String_View">
+    <DisplayString>{data,[length]s}</DisplayString>
+    <StringView>data,[length]s</StringView>
+
+    <Expand>
+      <Item Name="data">data</Item>
+      <Item Name="length">length</Item>
+    </Expand>
+  </Type>
+
+</AutoVisualizer>
