@@ -2,7 +2,7 @@
 
 #include "lexer.h"
 #include "core/dynamic_array.h"
-#include <map>
+#include "core/ordered_map.h"
 
 // Types
 // -------------------------------------------------------- //
@@ -14,8 +14,15 @@ enum class Type_Annotation_Kind {
     Pointer,
     Slice,
     Tuple,
-    UserDefined, // Structs, unions, enums, defined by the program.
-    Function, // Function names, both built-in and defined by the program.
+    UserDefined, // Structs, unions, enums, and functions defined by the program.
+};
+
+enum class User_Defined_Kind {
+    unresolved_type,
+    Struct,   // examples: Entity, Player
+    Union,    // examples: Token, Type_Annotation
+    Enum,     // examples: Flags, Keycode
+    Function, // examples: fn do_stuff() -> void, fn add(a, b: int) -> int
 };
 
 struct Type_Annotation {
@@ -24,48 +31,80 @@ struct Type_Annotation {
         struct { Token_Kind keyword; } builtin; // examples: i32, mat4, string
         struct { Type_Annotation *p_annotation; } pointer; // examples: *u8, *void, *Entity
         struct { Type_Annotation *p_annotation; } slice; // examples: []string, []u8, []i32
-        struct { Dynamic_Array<Type_Annotation> types; } tuple; // examples: (i32, string), (*void, []u8, bool)
-        struct { String_View name; } user_defined; // examples: Entity, Player
-        struct { String_View name; } function; // examples: fn do_stuff() -> void, fn add(a: int, b: int) -> int
+        struct { Dynamic_Array<Type_Annotation*> types; } tuple; // examples: (i32, string), (*void, []u8, bool)
+        struct { String_View name; User_Defined_Kind kind; } user_defined; // see User_Defined_Kind for examples
     };
     Location location;
     Type_Annotation_Kind kind;
 
     constexpr bool is_void() const
     {
-        return (kind == Type_Annotation_Kind::Builtin) &&
-            (builtin.keyword == Token_Kind::Void);
+        return (kind == Type_Annotation_Kind::Builtin)
+            && (builtin.keyword == Token_Kind::Void);
+    }
+
+    constexpr bool is_void_pointer() const
+    {
+        return (kind == Type_Annotation_Kind::Pointer)
+            && (pointer.p_annotation->kind == Type_Annotation_Kind::Builtin)
+            && (pointer.p_annotation->builtin.keyword == Token_Kind::Void);
+    }
+
+    constexpr bool is_pointer() const
+    {
+        return (kind == Type_Annotation_Kind::Pointer);
     }
 
     constexpr bool is_boolean() const
     {
-        return (kind == Type_Annotation_Kind::Builtin) &&
-            is_boolean_value(builtin.keyword);
+        return (kind == Type_Annotation_Kind::Builtin)
+            && (builtin.keyword == Token_Kind::Bool);
     }
 
     constexpr bool is_integer() const
     {
-        return (kind == Type_Annotation_Kind::Builtin) &&
-            is_integer_type(builtin.keyword);
+        return (kind == Type_Annotation_Kind::Builtin)
+            && is_integer_type(builtin.keyword);
+    }
+
+    constexpr bool is_float() const
+    {
+        return (kind == Type_Annotation_Kind::Builtin)
+            && is_float_type(builtin.keyword);
     }
 
     constexpr bool is_number() const
     {
-        return (kind == Type_Annotation_Kind::Builtin) &&
-            (is_integer_type(builtin.keyword) || is_float_type(builtin.keyword));
+        return (kind == Type_Annotation_Kind::Builtin)
+            && (is_integer_type(builtin.keyword) || is_float_type(builtin.keyword));
     }
 
     constexpr bool allows_math_operators() const
     {
-        return (kind == Type_Annotation_Kind::Builtin) &&
-            is_math_type(builtin.keyword);
+        return (kind == Type_Annotation_Kind::Builtin)
+            && is_math_type(builtin.keyword);
+    }
+
+    constexpr bool is_function() const
+    {
+        return (kind == Type_Annotation_Kind::UserDefined)
+            && (user_defined.kind == User_Defined_Kind::Function);
+    }
+
+    constexpr bool is_annonymous_object() const
+    {
+        bool is_unresolved_struct_or_union = (kind == Type_Annotation_Kind::UserDefined)
+            && (user_defined.kind == User_Defined_Kind::unresolved_type);
+        bool is_unresolved_array = (kind == Type_Annotation_Kind::Array)
+            && (array.p_annotation == nullptr);
+        return is_unresolved_struct_or_union || is_unresolved_array;
     }
 };
 
-void print_type_annotation(const Type_Annotation &annotation);
+void print_type_annotation(const Type_Annotation *p_annotation);
 
 struct Typed_Identifier_Group {
-    Type_Annotation type_annotation;
+    Type_Annotation *p_type_annotation;
     Dynamic_Array<const Token*> identifiers;
 };
 
@@ -258,7 +297,7 @@ enum class Stmt_Kind {
 };
 
 struct Variable_Definition {
-    Option<Type_Annotation> type_annotation;
+    Type_Annotation *p_type_annotation; // nullptr indicates no type annotation (the compiler infers it).
     const Token *p_name; // nullptr is invalid, it is required.
     Expr *p_initializer; // nullptr indicates no initializer.
     bool is_const;
@@ -308,7 +347,7 @@ void println_stmt(const Stmt &stmt, size_t level);
 // -------------------------------------------------------- //
 
 struct Function_Signature {
-    Type_Annotation return_type;
+    Type_Annotation *p_return_type;
     Dynamic_Array<Typed_Identifier_Group> args;
     String_View name;
     Location location;
@@ -330,7 +369,7 @@ struct Struct_Definition {
     String_View name;
     Location location;
 
-    bool contains(String_View field_name) const;
+    Type_Annotation *get_typeof_field(String_View field_name) const;
 };
 
 // All unions must have a name. No anonymous unions.
@@ -339,7 +378,7 @@ struct Union_Definition {
     String_View name;
     Location location;
 
-    bool contains(String_View field_name) const;
+    Type_Annotation *get_typeof_field(String_View field_name) const;
 };
 
 struct Enum_Listing {
@@ -353,6 +392,9 @@ struct Enum_Definition {
     Dynamic_Array<Enum_Listing> listings;
     String_View name;
     Location location;
+    Type_Annotation *p_underlying_type; // nullptr is invalid here. It is mandatory.
+
+    bool contains(String_View field_name) const;
 };
 
 // Precedence Levels
@@ -399,14 +441,12 @@ Parse_Rule get_parse_rule(Token_Kind kind);
 // -------------------------------------------------------- //
 
 struct Parser {
-    // These are ordered hash maps instead of unordered to have more consistent errors.
-    // Order is also very important in global variable definitions.
     // The keys are string views into the source code of the program.
-    std::map<String_View, Function_Definition> function_definitions = {};
-    std::map<String_View, Struct_Definition> struct_definitions = {};
-    std::map<String_View, Union_Definition> union_definitions = {};
-    std::map<String_View, Enum_Definition> enum_definitions = {};
-    std::map<String_View, Variable_Definition> global_variable_definitions = {};
+    std::unordered_map<String_View, Function_Definition> function_definitions = {};
+    std::unordered_map<String_View, Struct_Definition> struct_definitions = {};
+    std::unordered_map<String_View, Union_Definition> union_definitions = {};
+    std::unordered_map<String_View, Enum_Definition> enum_definitions = {};
+    Ordered_Map<String_View, Variable_Definition> global_variable_definitions = {};
 
     Pool<Type_Annotation, 256> type_annotation_pool = {};
     Pool<Expr, 1024> expression_pool = {};
@@ -467,7 +507,7 @@ struct Parser {
     Stmt parse_expr_stmt();
     Dynamic_Array<Stmt> parse_scope_block();
     Typed_Identifier_Group parse_typed_identifier_group();
-    Type_Annotation parse_type_annotation();
+    Type_Annotation *parse_type_annotation();
     Function_Signature parse_function_signature();
     Expr *parse_expr();
     Expr *parse_precedence(Precedence precedence);
@@ -483,5 +523,5 @@ struct Parser {
     Expr *parse_assignment(Expr *p_left);
     Expr *parse_call(Expr *p_left);
     Expr *parse_array_subscript(Expr *p_left);
-    Expr *parse_dot(Expr *p_left);
+    Expr *parse_field_access(Expr *p_left);
 };

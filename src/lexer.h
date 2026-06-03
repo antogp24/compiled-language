@@ -45,7 +45,8 @@ enum class Token_Kind {
 
     // Built-in Types (are also keywords)
     // NOTE: If you modify this, please modify: get_keyword(), is_builtin(),
-    //       is_boolean_value(), is_integer_type(), is_float_type(), is_math_type()
+    //       get_type_size_in_bytes(), is_boolean_value(), is_integer_type(), is_float_type(), is_math_type()
+    // NOTE: Order in integer and floating point types is very important for the implicit type conversion logic.
     Void,
     Bool,
     Char,
@@ -149,6 +150,7 @@ Number_Base get_digit_base(char c);
 bool is_alphanumeric(char c);
 Token_Kind get_keyword(String_View text);
 bool is_builtin(Token_Kind kind);
+size_t get_builtin_type_size_in_bytes(Token_Kind kind);
 bool is_boolean_value(Token_Kind kind);
 bool is_integer_type(Token_Kind kind);
 bool is_float_type(Token_Kind kind);

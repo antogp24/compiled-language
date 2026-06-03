@@ -13,13 +13,13 @@ void Type_Checker::check()
 // Gets all of the user defined types that are required to be complete
 // so that it is possible to calculate the size of a struct or union.
 static void get_nested_sized_user_defined_types(
-    const Type_Annotation &type_annotation,
-    Dynamic_Array<Type_Annotation> *nested)
+    const Type_Annotation *p_type_annotation,
+    Dynamic_Array<const Type_Annotation*> *nested)
 {
-    switch (type_annotation.kind) {
+    switch (p_type_annotation->kind) {
     case Type_Annotation_Kind::Array:
         get_nested_sized_user_defined_types(
-            *type_annotation.array.p_annotation, nested);
+            p_type_annotation->array.p_annotation, nested);
         break;
     case Type_Annotation_Kind::Pointer:
         // Stop walking the tree. All pointers have a known size.
@@ -28,13 +28,13 @@ static void get_nested_sized_user_defined_types(
         // Stop walking the tree. All slices are a pointer and a length.
         break;
     case Type_Annotation_Kind::Tuple:
-        for (size_t i = 0; i < type_annotation.tuple.types.count; ++i) {
-            const Type_Annotation &type_annotation_i = type_annotation.tuple.types[i];
+        for (size_t i = 0; i < p_type_annotation->tuple.types.count; ++i) {
+            const Type_Annotation *type_annotation_i = p_type_annotation->tuple.types[i];
             get_nested_sized_user_defined_types(type_annotation_i, nested);
         }
         break;
     case Type_Annotation_Kind::UserDefined:
-        nested->append(type_annotation);
+        nested->append(p_type_annotation);
         break;
     }
 }
@@ -81,16 +81,16 @@ void Type_Checker::check_user_defined_type_completeness()
 
     // Second pass adds the edges.
     {
-        Dynamic_Array<Type_Annotation> nested = {};
+        Dynamic_Array<const Type_Annotation*> nested = {};
         for (const auto &[struct_name, struct_def] : p_parser->struct_definitions) {
             for (const Typed_Identifier_Group &field : struct_def.fields) {
                 nested.count = 0; // Reusing the same dynamic array so allocations happen less often.
-                get_nested_sized_user_defined_types(field.type_annotation, &nested);
-                for (const Type_Annotation &annotation : nested) {
-                    debug_assert(annotation.kind == Type_Annotation_Kind::UserDefined);
+                get_nested_sized_user_defined_types(field.p_type_annotation, &nested);
+                for (const Type_Annotation *annotation : nested) {
+                    debug_assert(annotation->kind == Type_Annotation_Kind::UserDefined);
                     graph[struct_name].push_back({
-                        .name = annotation.user_defined.name,
-                        .location = annotation.location,
+                        .name = annotation->user_defined.name,
+                        .location = annotation->location,
                     });
                 }
             }
@@ -98,12 +98,12 @@ void Type_Checker::check_user_defined_type_completeness()
         for (const auto &[union_name, union_def] : p_parser->union_definitions) {
             for (const Typed_Identifier_Group &field : union_def.fields) {
                 nested.count = 0; // Reusing the same dynamic array so allocations happen less often.
-                get_nested_sized_user_defined_types(field.type_annotation, &nested);
-                for (const Type_Annotation &annotation : nested) {
-                    debug_assert(annotation.kind == Type_Annotation_Kind::UserDefined);
+                get_nested_sized_user_defined_types(field.p_type_annotation, &nested);
+                for (const Type_Annotation *annotation : nested) {
+                    debug_assert(annotation->kind == Type_Annotation_Kind::UserDefined);
                     graph[union_name].push_back({
-                        .name = annotation.user_defined.name,
-                        .location = annotation.location,
+                        .name = annotation->user_defined.name,
+                        .location = annotation->location,
                     });
                 }
             }
@@ -142,6 +142,191 @@ void Type_Checker::check_user_defined_type_completeness()
     }
 }
 
+// Navigates a type annotation tree, looking for unresolved user defined types,
+// then finding which type it is (struct or union).
+static void resolve_type_tree(Parser *p_parser, Type_Annotation *p_annotation)
+{
+    debug_assert(p_annotation);
+    switch (p_annotation->kind) {
+    case Type_Annotation_Kind::Array:
+        resolve_type_tree(p_parser, p_annotation->array.p_annotation);
+        break;
+    case Type_Annotation_Kind::Pointer:
+        resolve_type_tree(p_parser, p_annotation->pointer.p_annotation);
+        break;
+    case Type_Annotation_Kind::Slice:
+        resolve_type_tree(p_parser, p_annotation->slice.p_annotation);
+        break;
+    case Type_Annotation_Kind::Tuple:
+        for (Type_Annotation *p_subtype : p_annotation->tuple.types) {
+            resolve_type_tree(p_parser, p_subtype);
+        }
+        break;
+    case Type_Annotation_Kind::UserDefined:
+        if (p_annotation->user_defined.kind == User_Defined_Kind::unresolved_type) {
+            String_View type_name = p_annotation->user_defined.name;
+            if (p_parser->struct_definitions.contains(type_name)) {
+                p_annotation->user_defined.kind = User_Defined_Kind::Struct;
+            } else if (p_parser->union_definitions.contains(type_name)) {
+                p_annotation->user_defined.kind = User_Defined_Kind::Union;
+            } else if (p_parser->enum_definitions.contains(type_name)) {
+                p_annotation->user_defined.kind = User_Defined_Kind::Enum;
+            } else {
+                error_at(*p_parser->p_lexer, p_annotation->location,
+                    "Expected an unresolved struct, union, or enumeration.");
+            }
+        }
+        break;
+    default:
+        unreachable();
+    }
+}
+
+static bool are_types_equal(Type_Annotation *a, Type_Annotation *b)
+{
+    debug_assert(a && b);
+    using enum Type_Annotation_Kind;
+    switch (a->kind) {
+    case Array: {
+        if (b->kind != Array) {
+            return false;
+        }
+        return are_types_equal(a->array.p_annotation, b->array.p_annotation);
+    }
+    case Builtin: {
+        if (b->kind != Builtin) {
+            return false;
+        }
+        return a->builtin.keyword == b->builtin.keyword;
+    }
+    case Pointer: {
+        if (b->kind != Pointer) {
+            return false;
+        }
+        return are_types_equal(a->pointer.p_annotation, b->pointer.p_annotation);
+    }
+    case Slice: {
+        if (b->kind != Slice) {
+            return false;
+        }
+        return are_types_equal(a->slice.p_annotation, b->slice.p_annotation);
+    }
+    case Tuple: {
+        if (b->kind != Tuple) {
+            return false;
+        }
+        if (a->tuple.types.count != b->tuple.types.count) {
+            return false;
+        }
+        bool is_same = false;
+        for (size_t i = 0; i < a->tuple.types.count; ++i) {
+            is_same = is_same && are_types_equal(a->tuple.types[i], b->tuple.types[i]);
+        }
+        return is_same;
+    }
+    case UserDefined: {
+        if (b->kind != UserDefined) {
+            return false;
+        }
+        if (a->user_defined.kind != b->user_defined.kind) {
+            return false;
+        }
+        return a->user_defined.name.equals(b->user_defined.name);
+    }
+    default:
+        unreachable();
+    }
+}
+
+#define precision_loss_error(lexer, location, p_type_1, p_type_2)\
+    error_print_prefix();\
+    eprint("The conversion from type ");\
+    print_type_annotation(p_type_1);\
+    eprint(" to type ");\
+    print_type_annotation(p_type_2);\
+    eprintln(" loses precision. Use an explicit cast." ESC_CODE_RESET);\
+    (lexer).print_error_message_line(location);\
+    eprintln("");\
+    my_exit(1)
+
+#define incompatible_types_error(lexer, location, p_type_1, p_type_2)\
+    error_print_prefix();\
+    eprint("The type ");\
+    print_type_annotation(p_type_1);\
+    eprint(" is incompatible with the type ");\
+    print_type_annotation(p_type_2);\
+    eprintln("." ESC_CODE_RESET);\
+    (lexer).print_error_message_line(location);\
+    eprintln("");\
+    my_exit(1)
+
+#define type_error(lexer, location, p_type_annotation, format_string, ...)\
+    error_print_prefix();\
+    eprint("The type ");\
+    print_type_annotation(p_type_annotation);\
+    eprintln(" " format_string ESC_CODE_RESET, ##__VA_ARGS__);\
+    (lexer).print_error_message_line(location);\
+    eprintln("");\
+    my_exit(1)
+
+static Type_Annotation *get_upcast(Lexer *p_lexer, Location loc, Type_Annotation *a, Type_Annotation *b)
+{
+    if (are_types_equal(a, b)) {
+        return a;
+    }
+    if (a->is_integer() && b->is_integer()) {
+        const size_t sizeof_a = get_builtin_type_size_in_bytes(a->builtin.keyword);
+        const size_t sizeof_b = get_builtin_type_size_in_bytes(b->builtin.keyword);
+        // When they both have the same size, but a different signedness, an explicit cast is required.
+        if ((sizeof_a == sizeof_b) && (a->builtin.keyword != b->builtin.keyword)) {
+            precision_loss_error(*p_lexer, loc, a, b);
+        }
+        return (sizeof_a > sizeof_b) ? a : b;
+    }
+    if (a->is_float() && b->is_float()) {
+        return ((int)a->builtin.keyword > (int)b->builtin.keyword) ? a : b;
+    }
+    if (a->is_integer() && b->is_float()) {
+        return b;
+    }
+    if (a->is_float() && b->is_integer()) {
+        return a;
+    }
+    if (a->is_void_pointer() && b->is_pointer()) {
+        return b;
+    }
+    if (a->is_pointer() && b->is_void_pointer()) {
+        return a;
+    }
+    return nullptr;
+}
+
+static bool force_cast(Type_Annotation *to, Type_Annotation *from)
+{
+    if (from->is_annonymous_object()) {
+        switch (to->kind) {
+        case Type_Annotation_Kind::Array:
+            TODO("Resolving annonymous arrays.");
+            break;
+        case Type_Annotation_Kind::UserDefined:
+            TODO("Resolving annonymous structs.");
+            break;
+        default:
+            return false;
+        }
+    }
+    if (are_types_equal(to, from)) {
+        return true;
+    }
+    if (to->is_number() && from->is_number()) {
+        return true;
+    }
+    if (to->is_pointer() && from->is_pointer()) {
+        return true;
+    }
+    return false;
+}
+
 using Symbol_Table = std::unordered_map<String_View, Type_Annotation*>;
 
 // Recursively navigates the expression tree with DFS in post-order traversal
@@ -156,15 +341,6 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
         debug_assert(p_expr->p_type_annotation == nullptr);
     }
 
-#define type_error(p_expr, format_string, ...)\
-    error_print_prefix();\
-    eprint("The type ");\
-    print_type_annotation(*(p_expr)->p_type_annotation);\
-    eprintln(" " format_string ESC_CODE_RESET, ##__VA_ARGS__);\
-    p_lexer->print_error_message_line((p_expr)->location);\
-    eprintln("");\
-    my_exit(1)
-
     Lexer *p_lexer = p_parser->p_lexer;
 
     switch (p_expr->kind) {
@@ -178,7 +354,7 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
             p_expr->p_type_annotation->builtin.keyword = Token_Kind::Int;
             break;
         case Number_Kind::Char:
-            p_expr->p_type_annotation->builtin.keyword = Token_Kind::U32;
+            p_expr->p_type_annotation->builtin.keyword = Token_Kind::Char;
             break;
         case Number_Kind::Float:
             p_expr->p_type_annotation->builtin.keyword = Token_Kind::F64;
@@ -199,14 +375,17 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
         p_expr->p_type_annotation->kind = Type_Annotation_Kind::Tuple;
         for (Expr *p_subexpr : p_expr->tuple.expressions) {
             resolve_expr_tree(p_parser, symbol_table, p_subexpr);
-            p_expr->p_type_annotation->tuple.types.append(*p_subexpr->p_type_annotation);
+            p_expr->p_type_annotation->tuple.types.append(p_subexpr->p_type_annotation);
         }
     } break;
 
     case Expr_Kind::Cast: {
         Expr *p_casted = p_expr->cast.p_expr;
         resolve_expr_tree(p_parser, symbol_table, p_casted);
-        feature_todo(*p_lexer, p_expr->location, "type-resolving casting expressions");
+        if (!force_cast(p_expr->p_type_annotation, p_casted->p_type_annotation)) {
+            incompatible_types_error(*p_lexer, p_expr->location,
+                p_expr->p_type_annotation, p_casted->p_type_annotation);
+        }
     } break;
 
     case Expr_Kind::Unary: {
@@ -216,19 +395,19 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
         case Unary_Expr_Kind::Plus:
         case Unary_Expr_Kind::Minus: {
             if (!p_operated->p_type_annotation->allows_math_operators()) {
-                type_error(p_operated, "does not allow math operators.");
+                type_error(*p_lexer, p_expr->location, p_operated->p_type_annotation, "does not allow math operators.");
             }
             p_expr->p_type_annotation = p_operated->p_type_annotation;
         } break;
         case Unary_Expr_Kind::Dereference: {
             if (p_operated->p_type_annotation->kind != Type_Annotation_Kind::Pointer) {
-                type_error(p_operated, "does not allow dereference, it must be a pointer.");
+                type_error(*p_lexer, p_expr->location, p_operated->p_type_annotation, "does not allow dereference, it must be a pointer.");
             }
             p_expr->p_type_annotation = p_operated->p_type_annotation->pointer.p_annotation;
         } break;
         case Unary_Expr_Kind::Addressof: {
             if (!p_operated->is_lvalue()) {
-                type_error(p_operated, "is not an lvalue, thus it is not addressable.");
+                type_error(*p_lexer, p_expr->location, p_operated->p_type_annotation, "is not an lvalue, thus it is not addressable.");
             }
             p_expr->p_type_annotation = p_parser->type_annotation_pool.append();
             p_expr->p_type_annotation->kind = Type_Annotation_Kind::Pointer;
@@ -236,13 +415,13 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
         } break;
         case Unary_Expr_Kind::LogicalNot: {
             if (!p_operated->p_type_annotation->is_boolean()) {
-                type_error(p_operated, "is not a boolean, logical not is invalid here.");
+                type_error(*p_lexer, p_expr->location, p_operated->p_type_annotation, "is not a boolean, logical not is invalid here.");
             }
             p_expr->p_type_annotation = p_operated->p_type_annotation;
         } break;
         case Unary_Expr_Kind::BitwiseNot: {
             if (!p_operated->p_type_annotation->is_integer()) {
-                type_error(p_operated, "is not an integer type, bitwise not is invalid here.");
+                type_error(*p_lexer, p_expr->location, p_operated->p_type_annotation, "is not an integer type, bitwise not is invalid here.");
             }
             p_expr->p_type_annotation = p_operated->p_type_annotation;
         } break;
@@ -254,17 +433,73 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
     case Expr_Kind::Binary: {
         resolve_expr_tree(p_parser, symbol_table, p_expr->binary.p_left);
         resolve_expr_tree(p_parser, symbol_table, p_expr->binary.p_right);
-        feature_todo(*p_lexer, p_expr->location, "type-resolving binary expressions");
+        Type_Annotation *p_type_left = p_expr->binary.p_left->p_type_annotation;
+        Type_Annotation *p_type_right = p_expr->binary.p_right->p_type_annotation;
+        Type_Annotation *p_type = get_upcast(p_lexer, p_expr->location, p_type_left, p_type_right);
+        if (p_type == nullptr) {
+            incompatible_types_error(*p_lexer, p_expr->location, p_type_left, p_type_right);
+        }
+        switch (p_expr->binary.kind) {
+        case Binary_Expr_Kind::Add:
+        case Binary_Expr_Kind::Sub:
+        case Binary_Expr_Kind::Mul:
+        case Binary_Expr_Kind::Div:
+        case Binary_Expr_Kind::Mod:
+            if (!p_type->allows_math_operators()) {
+                type_error(*p_lexer, p_expr->location, p_type, "does not allow math operators.");
+            }
+            p_expr->p_type_annotation = p_type;
+            break;
+        case Binary_Expr_Kind::LogicalOr:
+        case Binary_Expr_Kind::LogicalAnd:
+            if (!p_type->is_boolean()) {
+                type_error(*p_lexer, p_expr->location, p_type, "is not a boolean.");
+            }
+            p_expr->p_type_annotation = p_type;
+            break;
+        case Binary_Expr_Kind::BitwiseOr:
+        case Binary_Expr_Kind::BitwiseAnd:
+        case Binary_Expr_Kind::BitwiseXor:
+        case Binary_Expr_Kind::ShiftLeft:
+        case Binary_Expr_Kind::ShiftRight:
+            if (!p_type->is_integer()) {
+                type_error(*p_lexer, p_expr->location, p_type, "is not an integer type.");
+            }
+            p_expr->p_type_annotation = p_type;
+            break;
+        case Binary_Expr_Kind::Equal:
+        case Binary_Expr_Kind::NotEqual:
+        case Binary_Expr_Kind::GreaterThan:
+        case Binary_Expr_Kind::LessThan:
+        case Binary_Expr_Kind::GreaterEqual:
+        case Binary_Expr_Kind::LessEqual:
+            if (p_type->kind != Type_Annotation_Kind::Builtin &&
+                p_type->kind != Type_Annotation_Kind::Pointer) {
+                type_error(*p_lexer, p_expr->location, p_type,
+                    "is not a built-in type or pointer type (only these types can be compared).");
+            }
+            p_expr->p_type_annotation = p_parser->type_annotation_pool.append();
+            p_expr->p_type_annotation->kind = Type_Annotation_Kind::Builtin;
+            p_expr->p_type_annotation->builtin.keyword = Token_Kind::Bool;
+            break;
+        default:
+            unreachable();
+        }
     } break;
 
     case Expr_Kind::Assignment: {
-        resolve_expr_tree(p_parser, symbol_table, p_expr->assignment.p_right);
-        resolve_expr_tree(p_parser, symbol_table, p_expr->assignment.p_left);
+        Expr *p_left = p_expr->assignment.p_left;
+        Expr *p_right = p_expr->assignment.p_right;
+        resolve_expr_tree(p_parser, symbol_table, p_right);
+        resolve_expr_tree(p_parser, symbol_table, p_left);
         if (!p_expr->assignment.p_left->is_lvalue()) {
             error_at(*p_lexer, p_expr->assignment.p_left->location,
                 "The left hand side of the assignment is not an lvalue.");
         }
-        feature_todo(*p_lexer, p_expr->location, "type-resolving assignment expressions");
+        if (!force_cast(p_left->p_type_annotation, p_right->p_type_annotation)) {
+            incompatible_types_error(*p_lexer, p_expr->location,
+                p_left->p_type_annotation, p_right->p_type_annotation);
+        }
     } break;
 
     case Expr_Kind::Grouping: {
@@ -275,16 +510,16 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
     case Expr_Kind::FunctionCall: {
         Expr *p_function = p_expr->function_call.p_left;
         resolve_expr_tree(p_parser, symbol_table, p_function);
-        if (p_function->p_type_annotation->kind != Type_Annotation_Kind::Function) {
-            type_error(p_function, "is not a function.");
+        if (p_function->p_type_annotation->is_function()) {
+            type_error(*p_lexer, p_expr->location, p_function->p_type_annotation, "is not a function.");
         }
         for (Expr *p_argument : p_expr->function_call.arguments) {
             resolve_expr_tree(p_parser, symbol_table, p_argument);
         }
-        String_View function_name = p_function->p_type_annotation->function.name;
+        String_View function_name = p_function->p_type_annotation->user_defined.name;
         debug_assert(p_parser->function_definitions.contains(function_name));
         Function_Definition &fn_def = p_parser->function_definitions[function_name];
-        p_expr->p_type_annotation = &fn_def.signature.return_type;
+        p_expr->p_type_annotation = fn_def.signature.p_return_type;
     } break;
 
     case Expr_Kind::ArraySubscript: {
@@ -306,7 +541,7 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
                 p_expr->p_type_annotation->builtin.keyword = Token_Kind::F32;
                 break;
             default:
-                type_error(p_array, "is not indexable.");
+                type_error(*p_lexer, p_expr->location, p_array->p_type_annotation, "is not indexable.");
             }
             break;
         case Type_Annotation_Kind::Array:
@@ -319,12 +554,12 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
             p_expr->p_type_annotation = p_array->p_type_annotation->slice.p_annotation;
             break;
         default:
-            type_error(p_array, "is not indexable.");
+            type_error(*p_lexer, p_expr->location, p_array->p_type_annotation, "is not indexable.");
         }
         Expr *p_index = p_expr->array_subscript.p_index;
         resolve_expr_tree(p_parser, symbol_table, p_index);
         if (!p_index->p_type_annotation->is_integer()) {
-            type_error(p_index, "is not an integer type.");
+            type_error(*p_lexer, p_expr->location, p_index->p_type_annotation, "is not an integer type.");
         }
     } break;
 
@@ -332,9 +567,9 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
         String_View field_name = p_expr->field_access.field_name;
         Expr *p_object = p_expr->field_access.p_left;
         resolve_expr_tree(p_parser, symbol_table, p_object);
-        p_expr->p_type_annotation = p_parser->type_annotation_pool.append();
         switch (p_object->p_type_annotation->kind) {
         case Type_Annotation_Kind::Builtin: {
+            p_expr->p_type_annotation = p_parser->type_annotation_pool.append();
             switch (p_object->p_type_annotation->builtin.keyword) {
             case Token_Kind::String:
                 if (field_name == String_View_literal("data")) {
@@ -346,14 +581,14 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
                     p_expr->p_type_annotation->kind = Type_Annotation_Kind::Builtin;
                     p_expr->p_type_annotation->builtin.keyword = Token_Kind::Int;
                 } else {
-                    type_error(p_object,
+                    type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
                         "does not have field \"{}\", it has fields \"data\", \"length\".", field_name);
                 }
                 break;
             case Token_Kind::Vec2:
                 if (field_name != String_View_literal("x") && 
                     field_name != String_View_literal("y")) {
-                    type_error(p_object,
+                    type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
                         "does not have field \"{}\", it has fields \"x\", \"y\".", field_name);
                 }
                 p_expr->p_type_annotation->kind = Type_Annotation_Kind::Builtin;
@@ -363,7 +598,7 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
                 if (field_name != String_View_literal("x") && 
                     field_name != String_View_literal("y") &&
                     field_name != String_View_literal("z")) {
-                    type_error(p_object,
+                    type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
                         "does not have field \"{}\", it has fields \"x\", \"y\", \"z\".", field_name);
                 }
                 p_expr->p_type_annotation->kind = Type_Annotation_Kind::Builtin;
@@ -374,17 +609,19 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
                     field_name != String_View_literal("y") &&
                     field_name != String_View_literal("z") &&
                     field_name != String_View_literal("w")) {
-                    type_error(p_object,
+                    type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
                         "does not have field \"{}\", it has fields \"x\", \"y\", \"z\", \"w\".", field_name);
                 }
                 p_expr->p_type_annotation->kind = Type_Annotation_Kind::Builtin;
                 p_expr->p_type_annotation->builtin.keyword = Token_Kind::F32;
                 break;
             default:
-                type_error(p_object, "does not have fields to access.");
+                type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
+                    "does not have fields to access.");
             }
         } break;
         case Type_Annotation_Kind::Slice: {
+            p_expr->p_type_annotation = p_parser->type_annotation_pool.append();
             if (field_name == String_View_literal("data")) {
                 Type_Annotation *slice_subtype = p_object->p_type_annotation->slice.p_annotation;
                 p_expr->p_type_annotation->kind = Type_Annotation_Kind::Pointer;
@@ -393,7 +630,7 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
                 p_expr->p_type_annotation->kind = Type_Annotation_Kind::Builtin;
                 p_expr->p_type_annotation->builtin.keyword = Token_Kind::Int;
             } else {
-                type_error(p_object,
+                type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
                     "does not have field \"{}\", it has fields \"data\", \"length\".", field_name);
             }
         } break;
@@ -405,41 +642,64 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
                     "The tuple field {} is out of bounds for a tuple of {} elements.",
                     field_as_number, element_count);
             }
-            *p_expr->p_type_annotation = p_object->p_type_annotation->tuple.types[field_as_number];
+            p_expr->p_type_annotation = p_object->p_type_annotation->tuple.types[field_as_number];
         } break;
         case Type_Annotation_Kind::UserDefined: {
             String_View type_name = p_object->p_type_annotation->user_defined.name;
             if (type_name.length == 0) {
                 error_at(*p_lexer, p_expr->location, "Accessing annonymous structs is invalid.");
             }
-            if (p_parser->struct_definitions.contains(type_name)) {
+            switch (p_object->p_type_annotation->user_defined.kind) {
+            case User_Defined_Kind::Struct: {
+                debug_assert(p_parser->struct_definitions.contains(type_name));
                 const Struct_Definition &def = p_parser->struct_definitions[type_name];
-                if (!def.contains(field_name)) {
-                    type_error(p_object, "does not have a field called \"{}\".", field_name);
+                Type_Annotation *p_field_type = def.get_typeof_field(field_name);
+                if (!p_field_type) {
+                    type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
+                        "does not have a field called \"{}\".", field_name);
                 }
-            } else if (p_parser->union_definitions.contains(type_name)) {
+                p_expr->p_type_annotation = p_field_type;
+            } break;
+            case User_Defined_Kind::Union: {
+                debug_assert(p_parser->union_definitions.contains(type_name));
                 const Union_Definition &def = p_parser->union_definitions[type_name];
-                if (!def.contains(field_name)) {
-                    type_error(p_object, "does not have a field called \"{}\".", field_name);
+                Type_Annotation *p_field_type = def.get_typeof_field(field_name);
+                if (!p_field_type) {
+                    type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
+                        "does not have a field called \"{}\".", field_name);
                 }
-            } else {
-                type_error(p_object, "is not a defined struct or union.");
+                p_expr->p_type_annotation = p_field_type;
+            } break;
+            case User_Defined_Kind::Enum: {
+                debug_assert(p_parser->enum_definitions.contains(type_name));
+                const Enum_Definition &def = p_parser->enum_definitions[type_name];
+                if (!def.contains(field_name)) {
+                    type_error(*p_lexer, p_expr->location, p_object->p_type_annotation,
+                        "does not have a field called \"{}\".", field_name);
+                }
+                p_expr->p_type_annotation = def.p_underlying_type;
+            } break;
+            default:
+                error_at(*p_lexer, p_expr->location, "Expected a struct, union, or enumeration.");
             }
-            p_expr->p_type_annotation->kind = Type_Annotation_Kind::UserDefined;
-            p_expr->p_type_annotation->user_defined.name = type_name;
         } break;
         default:
-            type_error(p_object, "does not have fields to access.");
+            type_error(*p_lexer, p_expr->location, p_object->p_type_annotation, "does not have fields to access.");
         }
-        feature_todo(*p_lexer, p_expr->location, "type-resolving field access expressions");
     } break;
 
     case Expr_Kind::Variable: {
         String_View name = p_expr->variable.name;
         if (p_parser->function_definitions.contains(name)) {
             p_expr->p_type_annotation = p_parser->type_annotation_pool.append();
-            p_expr->p_type_annotation->kind = Type_Annotation_Kind::Function;
-            p_expr->p_type_annotation->function.name = name;
+            p_expr->p_type_annotation->kind = Type_Annotation_Kind::UserDefined;
+            p_expr->p_type_annotation->user_defined.kind = User_Defined_Kind::Function;
+            p_expr->p_type_annotation->user_defined.name = name;
+        } else if (p_parser->enum_definitions.contains(name)) {
+            p_expr->p_type_annotation = p_parser->type_annotation_pool.append();
+            p_expr->p_type_annotation->kind = Type_Annotation_Kind::UserDefined;
+            p_expr->p_type_annotation->user_defined.kind = User_Defined_Kind::Enum;
+            p_expr->p_type_annotation->user_defined.name = name;
         } else {
             if (!symbol_table.contains(name)) {
                 error_at(*p_lexer, p_expr->location, "Undefined variable or function {}.", name);
@@ -459,6 +719,7 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
             // Later when this expression is saved in a variable or passed to a function,
             // the initializer list has to match one of the defined structs/unions in the program.
             p_expr->p_type_annotation->kind = Type_Annotation_Kind::UserDefined;
+            p_expr->p_type_annotation->user_defined.kind = User_Defined_Kind::unresolved_type;
         } break;
         case Initializer_List_Kind::Unnamed: {
             // Checking that all elements have the same type is done later when this is used.
@@ -466,6 +727,7 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
                 resolve_expr_tree(p_parser, symbol_table, p_array_element);
             }
             p_expr->p_type_annotation->kind = Type_Annotation_Kind::Array;
+            p_expr->p_type_annotation->array.p_annotation = nullptr;
         } break;
         default:
             unreachable();
@@ -493,19 +755,30 @@ static void resolve_expr_tree(Parser *p_parser, Symbol_Table &symbol_table, Expr
 
     // Now it should be resolved.
     debug_assert(p_expr->p_type_annotation);
-
-#undef type_error
 }
 
 void Type_Checker::resolve_global_variable_types()
 {
     Symbol_Table symbol_table = {};
 
-    for (const auto &[name, def] : p_parser->global_variable_definitions) {
+    for (String_View name : p_parser->global_variable_definitions.order) {
+        const Variable_Definition &def = p_parser->global_variable_definitions.map[name];
         assert(def.p_initializer);
         resolve_expr_tree(p_parser, symbol_table, def.p_initializer);
-        symbol_table[name] = def.p_initializer->p_type_annotation;
-        // TODO: Checking that the type of the initializer is compatible with
-        //       the type of the variable definition (casting if it is a number).
+        if (def.p_type_annotation) {
+            resolve_type_tree(p_parser, def.p_type_annotation);
+            if (!force_cast(def.p_type_annotation, def.p_initializer->p_type_annotation)) {
+                incompatible_types_error(*p_parser->p_lexer, def.p_initializer->location,
+                    def.p_type_annotation, def.p_initializer->p_type_annotation);
+            }
+            symbol_table[name] = def.p_type_annotation;
+        } else {
+            if (def.p_initializer->p_type_annotation->is_annonymous_object()) {
+                error_at(*p_parser->p_lexer, def.p_initializer->location,
+                    "When using a struct/array literal, you must provide the"
+                    "type annotation in the variable definition.");
+            }
+            symbol_table[name] = def.p_initializer->p_type_annotation;
+        }
     }
 }

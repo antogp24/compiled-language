@@ -149,6 +149,7 @@
     <ClInclude Include="src\core\dynamic_stack.h" />
     <ClInclude Include="src\core\escape_codes.h" />
     <ClInclude Include="src\core\linked_list.h" />
+    <ClInclude Include="src\core\ordered_map.h" />
     <ClInclude Include="src\core\string.h" />
     <ClInclude Include="src\lexer.h" />
     <ClInclude Include="src\core\option.h" />

@@ -231,6 +231,45 @@ bool is_builtin(Token_Kind kind)
     return false;
 }
 
+size_t get_builtin_type_size_in_bytes(Token_Kind kind)
+{
+    using enum Token_Kind;
+    switch (kind) {
+    case Void:
+        return 0;
+    case String:
+        return 8 * 2;
+    case Bool:
+    case I8:
+    case U8:
+        return 1;
+    case I16:
+    case U16:
+        return 2;
+    case Char:
+    case I32:
+    case U32:
+    case F32:
+        return 4;
+    case I64:
+    case U64:
+    case Int:
+    case Uint:
+    case F64:
+        return 8;
+    case Vec2:
+        return 4 * 2; // 2 f32
+    case Vec3:
+        return 4 * 3; // 3 f32
+    case Vec4:
+        return 4 * 4; // 4 f32
+    case Mat4:
+        return 4 * 16; // 16 f32
+    default:
+        unreachable();
+    }
+}
+
 bool is_boolean_value(Token_Kind kind)
 {
     return kind == Token_Kind::True || kind == Token_Kind::False;

@@ -1,4 +1,4 @@
-enum Flags {
+enum Flags u8 {
 	A,
 	B,
 	C,
@@ -14,9 +14,10 @@ struct C2 { c3: C3 }
 struct C3 { c1: *C1 }
 
 // Global variables test
+let flags = Flags.A | Flags.B;
 let a = ~(0xff);
-let b = !a;
-//let c = b * 2 + a;
+let b = (a + 1) % 2.0 + Flags.A;
+let c = b * 2 + a;
 
 fn test() {
     #'some_label: loop {

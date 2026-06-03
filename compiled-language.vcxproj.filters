@@ -71,6 +71,9 @@
     <ClInclude Include="src\core\dynamic_stack.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\core\ordered_map.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Natvis Include="NatvisFile.natvis" />
